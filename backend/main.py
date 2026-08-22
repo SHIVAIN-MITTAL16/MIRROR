@@ -4,6 +4,7 @@ from math import ceil, log
 from functools import lru_cache
 import random
 
+import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.encoders import jsonable_encoder
@@ -125,6 +126,28 @@ def load_locked_data() -> Dict:
 		},
 		"catalog_skus": catalog_skus,
 		"catalog_skus_by_sku": {sku["sku_id"]: sku for sku in catalog_skus},
+	}
+
+
+def simulate_demand_window(
+	mu: float,
+	nb_k: int,
+	days: int,
+	rng: np.random.Generator,
+) -> Dict:
+	"""Simulate independent Distribution #2 daily demand for one window."""
+	if mu <= 0:
+		raise ValueError("mu must be positive")
+	if days < 0:
+		raise ValueError("days must be non-negative")
+	n = int(nb_k)
+	if n <= 0 or n != nb_k:
+		raise ValueError("nb_k must be a positive integer")
+	p = n / (n + mu)
+	daily_demand = [int(draw) for draw in rng.negative_binomial(n=n, p=p, size=days)]
+	return {
+		"daily_demand": daily_demand,
+		"cumulative_demand": sum(daily_demand),
 	}
 
 
