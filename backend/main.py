@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import List, Dict
 from math import ceil, log
+from functools import lru_cache
 import random
 
 import pandas as pd
@@ -91,6 +92,40 @@ def load_and_validate(csv_path: Path) -> pd.DataFrame:
 		raise RuntimeError("Validation failed: absent shipments must have zero incoming quantity")
 
 	return df
+
+
+@lru_cache(maxsize=1)
+def load_locked_data() -> Dict:
+	"""Load and cache the locked catalog and merchant-state records."""
+	csv_path = get_data_path()
+	if not csv_path.exists():
+		raise RuntimeError(f"SKU CSV not found at {csv_path}")
+
+	df = load_and_validate(csv_path)
+	locked_records = jsonable_encoder(
+		df.astype(object).where(pd.notna(df), None).to_dict(orient="records")
+	)
+	skus = [
+		{column: record[column] for column in SKU_COLUMNS}
+		for record in locked_records
+	]
+	merchant_states = [
+		{column: record[column] for column in MERCHANT_STATE_COLUMNS}
+		for record in locked_records
+	]
+	catalog_skus = [
+		{column: record[column] for column in SKU_COLUMNS + PRODUCT_COLUMNS}
+		for record in locked_records
+	]
+	return {
+		"skus": skus,
+		"merchant_states": merchant_states,
+		"merchant_states_by_sku": {
+			state["sku_id"]: state for state in merchant_states
+		},
+		"catalog_skus": catalog_skus,
+		"catalog_skus_by_sku": {sku["sku_id"]: sku for sku in catalog_skus},
+	}
 
 
 def generate_buyer_request_quantity(mu: float, rng: random.Random) -> Dict:
@@ -350,35 +385,109 @@ def create_buyer_rng_streams(experiment_seed: int = EXPERIMENT_SEED) -> Dict[str
 	}
 
 
+def assemble_population_request(
+	experiment_seed: int,
+	request_id: int,
+	streams: Dict[str, random.Random],
+	states_by_sku: Dict[str, Dict],
+	catalog_skus: List[Dict],
+) -> Dict:
+	"""Assemble one immutable request from the locked Distributions #1-#9."""
+	target_sku = select_target_sku(catalog_skus, streams["buyer_target_rng"])
+	target_sku_id = target_sku["sku_id"]
+	target_state = states_by_sku[target_sku_id]
+	brand_preference = target_sku["brand"]
+	min_ram_gb = target_sku["ram_gb"]
+	min_storage_gb = target_sku["storage_gb"]
+
+	deadline_days = generate_buyer_deadline(streams["buyer_deadline_rng"])
+	quantity = generate_buyer_request_quantity(target_state["mu"], streams["buyer_quantity_rng"])
+	budget = generate_buyer_budget(
+		quantity["requested_quantity"],
+		target_sku["current_price"],
+		streams["buyer_budget_rng"],
+	)
+	flexibility = generate_buyer_flexibility(
+		streams["buyer_price_rng"],
+		streams["buyer_quantity_flexibility_rng"],
+		streams["buyer_timing_rng"],
+		streams["buyer_substitution_rng"],
+	)
+	substitutes = eligible_substitute_skus(
+		catalog_skus,
+		target_sku_id,
+		brand_preference,
+		min_ram_gb,
+		min_storage_gb,
+		flexibility["substitution_tolerance"],
+	)
+	availability = available_for_window(target_state, deadline_days)
+	classification = classify_buyer_request(
+		target_sku,
+		target_state,
+		quantity["requested_quantity"],
+		deadline_days,
+		flexibility,
+		substitutes,
+		states_by_sku,
+	)
+	return {
+		"experiment_seed": experiment_seed,
+		"request_id": request_id,
+		"target_sku_id": target_sku_id,
+		"brand_preference": brand_preference,
+		"min_ram_gb": min_ram_gb,
+		"min_storage_gb": min_storage_gb,
+		"eligible_substitute_skus": substitutes,
+		"substitution_tolerance": flexibility["substitution_tolerance"],
+		"requested_quantity": quantity["requested_quantity"],
+		"q_raw": quantity["q_raw"],
+		"quantity_cap": quantity["quantity_cap"],
+		"current_price": target_sku["current_price"],
+		"budget_factor": budget["budget_factor"],
+		"budget": budget["budget"],
+		"deadline_days": deadline_days,
+		"price_flexibility": flexibility["price_flexibility"],
+		"price_tolerance_pct": flexibility["price_tolerance_pct"],
+		"quantity_flexibility": flexibility["quantity_flexibility"],
+		"quantity_tolerance_pct": flexibility["quantity_tolerance_pct"],
+		"timing_flexibility": flexibility["timing_flexibility"],
+		"timing_tolerance_days": flexibility["timing_tolerance_days"],
+		"on_hand": target_state["on_hand"],
+		"reserved": target_state["reserved"],
+		"incoming_quantity": target_state["incoming_quantity"],
+		"incoming_eta_days": target_state["incoming_eta_days"],
+		**availability,
+		**classification,
+	}
+
+
+def generate_request_population(seed: int, n: int = 100) -> List[Dict]:
+	"""Return a reproducible in-memory population of complete buyer requests."""
+	if n < 0:
+		raise ValueError("n must be non-negative")
+	streams = create_buyer_rng_streams(seed)
+	locked_data = load_locked_data()
+	return [
+		assemble_population_request(
+			seed,
+			request_id,
+			streams,
+			locked_data["merchant_states_by_sku"],
+			locked_data["catalog_skus"],
+		)
+		for request_id in range(1, n + 1)
+	]
+
+
 @APP.on_event("startup")
 def startup_load_data() -> None:
-	csv_path = get_data_path()
-	if not csv_path.exists():
-		raise RuntimeError(f"SKU CSV not found at {csv_path}")
-
-	df = load_and_validate(csv_path)
-
-	locked_records = jsonable_encoder(
-		df.astype(object).where(pd.notna(df), None).to_dict(orient="records")
-	)
-	APP.state.skus: List[Dict] = [
-		{column: record[column] for column in SKU_COLUMNS}
-		for record in locked_records
-	]
-	APP.state.merchant_states: List[Dict] = [
-		{column: record[column] for column in MERCHANT_STATE_COLUMNS}
-		for record in locked_records
-	]
-	APP.state.merchant_states_by_sku = {
-		state["sku_id"]: state for state in APP.state.merchant_states
-	}
-	APP.state.catalog_skus: List[Dict] = [
-		{column: record[column] for column in SKU_COLUMNS + PRODUCT_COLUMNS}
-		for record in locked_records
-	]
-	APP.state.catalog_skus_by_sku = {
-		sku["sku_id"]: sku for sku in APP.state.catalog_skus
-	}
+	locked_data = load_locked_data()
+	APP.state.skus = locked_data["skus"]
+	APP.state.merchant_states = locked_data["merchant_states"]
+	APP.state.merchant_states_by_sku = locked_data["merchant_states_by_sku"]
+	APP.state.catalog_skus = locked_data["catalog_skus"]
+	APP.state.catalog_skus_by_sku = locked_data["catalog_skus_by_sku"]
 	for name, rng in create_buyer_rng_streams().items():
 		setattr(APP.state, name, rng)
 
