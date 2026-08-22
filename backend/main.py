@@ -15,6 +15,7 @@ SKU_COLUMNS = [
 	"discount_pct", "cost_ratio", "unit_cost", "margin_floor", "minimum_price",
 	"current_margin",
 ]
+PRODUCT_COLUMNS = ["brand", "ram_gb", "storage_gb"]
 MERCHANT_STATE_COLUMNS = [
 	"sku_id", "heterogeneity_multiplier", "mu", "nb_k", "incoming_exists",
 	"incoming_quantity", "incoming_eta_days", "on_hand", "reserved",
@@ -24,6 +25,21 @@ BUYER_BUDGET_LOG_LOCATION = log(0.92)
 BUYER_BUDGET_LOG_SIGMA = 0.10
 BUYER_DEADLINE_VALUES = (2, 3, 5, 7, 10)
 BUYER_DEADLINE_PROBABILITIES = (0.10, 0.20, 0.35, 0.25, 0.10)
+EXPERIMENT_SEED = 20260821
+TARGET_SEED = EXPERIMENT_SEED + 1
+PRICE_SEED = EXPERIMENT_SEED + 2
+QUANTITY_SEED = EXPERIMENT_SEED + 3
+TIMING_SEED = EXPERIMENT_SEED + 4
+SUBSTITUTION_SEED = EXPERIMENT_SEED + 5
+BUYER_QUANTITY_SEED = EXPERIMENT_SEED + 6
+BUYER_BUDGET_SEED = EXPERIMENT_SEED + 7
+BUYER_DEADLINE_SEED = EXPERIMENT_SEED + 8
+FLEXIBILITY_PROBABILITIES = (0.50, 0.35, 0.15)
+PRICE_FLEXIBILITY_CHOICES = (("Low", 0.02), ("Medium", 0.05), ("High", 0.10))
+QUANTITY_FLEXIBILITY_CHOICES = (("Low", 0.10), ("Medium", 0.25), ("High", 0.50))
+TIMING_FLEXIBILITY_CHOICES = (("Low", 0), ("Medium", 2), ("High", 3))
+SUBSTITUTION_TOLERANCE_VALUES = (0, 1)
+SUBSTITUTION_TOLERANCE_PROBABILITIES = (0.60, 0.40)
 
 
 def get_data_path() -> Path:
@@ -36,7 +52,7 @@ def load_and_validate(csv_path: Path) -> pd.DataFrame:
 	df = pd.read_csv(csv_path)
 
 	expected_rows = 50
-	required_columns = set(SKU_COLUMNS + MERCHANT_STATE_COLUMNS)
+	required_columns = set(SKU_COLUMNS + PRODUCT_COLUMNS + MERCHANT_STATE_COLUMNS)
 
 	if len(df) != expected_rows:
 		raise RuntimeError(f"CSV must contain exactly {expected_rows} rows (found {len(df)})")
@@ -77,7 +93,7 @@ def load_and_validate(csv_path: Path) -> pd.DataFrame:
 	return df
 
 
-def generate_buyer_request_quantity(mu: float, rng=random) -> Dict:
+def generate_buyer_request_quantity(mu: float, rng: random.Random) -> Dict:
 	"""Generate Distribution #6 quantity from the locked SKU demand mean."""
 	q_raw = rng.lognormvariate(log(3 * mu), BUYER_QUANTITY_LOG_SIGMA)
 	quantity_cap = max(20, ceil(8 * mu))
@@ -92,7 +108,7 @@ def generate_buyer_request_quantity(mu: float, rng=random) -> Dict:
 def generate_buyer_budget(
 	requested_quantity: int,
 	current_price: float,
-	rng=random,
+	rng: random.Random,
 ) -> Dict:
 	"""Generate Distribution #7 buyer willingness-to-pay budget."""
 	budget_factor = rng.lognormvariate(
@@ -113,6 +129,225 @@ def generate_buyer_deadline(rng: random.Random) -> int:
 		weights=BUYER_DEADLINE_PROBABILITIES,
 		k=1,
 	)[0]
+
+
+def generate_buyer_flexibility(
+	price_rng: random.Random,
+	quantity_rng: random.Random,
+	timing_rng: random.Random,
+	substitution_rng: random.Random,
+) -> Dict:
+	"""Generate the four independent locked Distribution #9A dimensions."""
+	price_flexibility, price_tolerance_pct = price_rng.choices(
+		PRICE_FLEXIBILITY_CHOICES,
+		weights=FLEXIBILITY_PROBABILITIES,
+		k=1,
+	)[0]
+	quantity_flexibility, quantity_tolerance_pct = quantity_rng.choices(
+		QUANTITY_FLEXIBILITY_CHOICES,
+		weights=FLEXIBILITY_PROBABILITIES,
+		k=1,
+	)[0]
+	timing_flexibility, timing_tolerance_days = timing_rng.choices(
+		TIMING_FLEXIBILITY_CHOICES,
+		weights=FLEXIBILITY_PROBABILITIES,
+		k=1,
+	)[0]
+	substitution_tolerance = substitution_rng.choices(
+		SUBSTITUTION_TOLERANCE_VALUES,
+		weights=SUBSTITUTION_TOLERANCE_PROBABILITIES,
+		k=1,
+	)[0]
+	return {
+		"price_flexibility": price_flexibility,
+		"price_tolerance_pct": price_tolerance_pct,
+		"quantity_flexibility": quantity_flexibility,
+		"quantity_tolerance_pct": quantity_tolerance_pct,
+		"timing_flexibility": timing_flexibility,
+		"timing_tolerance_days": timing_tolerance_days,
+		"substitution_tolerance": substitution_tolerance,
+	}
+
+
+def select_target_sku(catalog_skus: List[Dict], rng: random.Random) -> Dict:
+	"""Uniformly select one locked SKU without consulting economic fields."""
+	return rng.choice(catalog_skus)
+
+
+def eligible_substitute_skus(
+	catalog_skus: List[Dict],
+	target_sku_id: str,
+	brand_preference: str,
+	min_ram_gb: int,
+	min_storage_gb: int,
+	substitution_tolerance: int,
+) -> List[str]:
+	"""Match substitutes using only the locked brand and technical requirements."""
+	if substitution_tolerance == 0:
+		return []
+	return [
+		sku["sku_id"]
+		for sku in catalog_skus
+		if sku["sku_id"] != target_sku_id
+		and sku["brand"] == brand_preference
+		and sku["ram_gb"] >= min_ram_gb
+		and sku["storage_gb"] >= min_storage_gb
+	]
+
+
+def available_for_window(state: Dict, days: int) -> Dict:
+	"""Deterministic availability details shared by endpoint and classifier."""
+	incoming = (
+		state["incoming_quantity"]
+		if state["incoming_exists"] and state["incoming_eta_days"] <= days
+		else 0
+	)
+	expected_demand = ceil(state["mu"] * days)
+	return {
+		"incoming_available": incoming,
+		"expected_demand_for_feasibility": expected_demand,
+		"available": state["on_hand"] - state["reserved"] + incoming - expected_demand,
+	}
+
+
+def classify_buyer_request(
+	target_sku: Dict,
+	target_state: Dict,
+	requested_quantity: int,
+	deadline_days: int,
+	flexibility: Dict,
+	substitutes: List[str],
+	states_by_sku: Dict[str, Dict],
+) -> Dict:
+	"""Pure Distribution #9 classifier; it never calls an optimizer."""
+	available_at_deadline = available_for_window(target_state, deadline_days)["available"]
+	baseline_feasible = requested_quantity <= available_at_deadline
+
+	price_opportunity = (
+		baseline_feasible
+		and flexibility["price_tolerance_pct"] > 0
+		and target_sku["current_margin"] >= 0.16
+	)
+	quantity_alternative = max(
+		1,
+		ceil(requested_quantity * (1 - flexibility["quantity_tolerance_pct"])),
+	)
+	quantity_conflict = (
+		not baseline_feasible
+		and flexibility["quantity_tolerance_pct"] > 0
+		and quantity_alternative <= available_at_deadline
+	)
+	timing_deadline = deadline_days + flexibility["timing_tolerance_days"]
+	timing_conflict = (
+		not baseline_feasible
+		and flexibility["timing_tolerance_days"] > 0
+		and requested_quantity <= available_for_window(target_state, timing_deadline)["available"]
+	)
+	substitution_opportunity = (
+		baseline_feasible
+		and flexibility["substitution_tolerance"] == 1
+		and len(substitutes) > 0
+	)
+	substitution_conflict = (
+		not baseline_feasible
+		and flexibility["substitution_tolerance"] == 1
+		and any(
+			requested_quantity <= available_for_window(states_by_sku[sku_id], deadline_days)["available"]
+			for sku_id in substitutes
+		)
+	)
+
+	if baseline_feasible:
+		classification = (
+			"OPPORTUNITY"
+			if price_opportunity or substitution_opportunity
+			else "BASELINE_ACCEPT"
+		)
+	else:
+		classification = (
+			"CONSTRAINT_CONFLICT"
+			if quantity_conflict or timing_conflict or substitution_conflict
+			else "HARD_REJECT"
+		)
+	return {
+		"baseline_feasible": baseline_feasible,
+		"classification": classification,
+	}
+
+
+def build_buyer_request(sku_id: str) -> Dict:
+	"""Combine locked Distributions #6-#9 for one selected target SKU."""
+	target_sku = APP.state.catalog_skus_by_sku[sku_id]
+	target_state = APP.state.merchant_states_by_sku[sku_id]
+	quantity = generate_buyer_request_quantity(
+		target_state["mu"],
+		APP.state.buyer_quantity_rng,
+	)
+	budget = generate_buyer_budget(
+		quantity["requested_quantity"],
+		target_sku["current_price"],
+		APP.state.buyer_budget_rng,
+	)
+	deadline_days = generate_buyer_deadline(APP.state.buyer_deadline_rng)
+	flexibility = generate_buyer_flexibility(
+		APP.state.buyer_price_rng,
+		APP.state.buyer_quantity_flexibility_rng,
+		APP.state.buyer_timing_rng,
+		APP.state.buyer_substitution_rng,
+	)
+	brand_preference = target_sku["brand"]
+	min_ram_gb = target_sku["ram_gb"]
+	min_storage_gb = target_sku["storage_gb"]
+	substitutes = eligible_substitute_skus(
+		APP.state.catalog_skus,
+		sku_id,
+		brand_preference,
+		min_ram_gb,
+		min_storage_gb,
+		flexibility["substitution_tolerance"],
+	)
+	classification = classify_buyer_request(
+		target_sku,
+		target_state,
+		quantity["requested_quantity"],
+		deadline_days,
+		flexibility,
+		substitutes,
+		APP.state.merchant_states_by_sku,
+	)
+	return {
+		"sku_id": sku_id,
+		"target_sku_id": sku_id,
+		"mu": target_state["mu"],
+		**quantity,
+		"current_price": target_sku["current_price"],
+		**budget,
+		"deadline_days": deadline_days,
+		"brand_preference": brand_preference,
+		"min_ram_gb": min_ram_gb,
+		"min_storage_gb": min_storage_gb,
+		"eligible_substitute_skus": substitutes,
+		**flexibility,
+		**classification,
+	}
+
+
+def create_buyer_rng_streams(experiment_seed: int = EXPERIMENT_SEED) -> Dict[str, random.Random]:
+	"""Create independent, reproducible streams for buyer request generation."""
+	return {
+		"buyer_target_rng": random.Random(experiment_seed + TARGET_SEED - EXPERIMENT_SEED),
+		"buyer_price_rng": random.Random(experiment_seed + PRICE_SEED - EXPERIMENT_SEED),
+		"buyer_quantity_flexibility_rng": random.Random(
+			experiment_seed + QUANTITY_SEED - EXPERIMENT_SEED
+		),
+		"buyer_timing_rng": random.Random(experiment_seed + TIMING_SEED - EXPERIMENT_SEED),
+		"buyer_substitution_rng": random.Random(
+			experiment_seed + SUBSTITUTION_SEED - EXPERIMENT_SEED
+		),
+		"buyer_quantity_rng": random.Random(experiment_seed + BUYER_QUANTITY_SEED - EXPERIMENT_SEED),
+		"buyer_budget_rng": random.Random(experiment_seed + BUYER_BUDGET_SEED - EXPERIMENT_SEED),
+		"buyer_deadline_rng": random.Random(experiment_seed + BUYER_DEADLINE_SEED - EXPERIMENT_SEED),
+	}
 
 
 @APP.on_event("startup")
@@ -137,8 +372,15 @@ def startup_load_data() -> None:
 	APP.state.merchant_states_by_sku = {
 		state["sku_id"]: state for state in APP.state.merchant_states
 	}
-	APP.state.skus_by_sku = {sku["sku_id"]: sku for sku in APP.state.skus}
-	APP.state.buyer_deadline_rng = random.Random()
+	APP.state.catalog_skus: List[Dict] = [
+		{column: record[column] for column in SKU_COLUMNS + PRODUCT_COLUMNS}
+		for record in locked_records
+	]
+	APP.state.catalog_skus_by_sku = {
+		sku["sku_id"]: sku for sku in APP.state.catalog_skus
+	}
+	for name, rng in create_buyer_rng_streams().items():
+		setattr(APP.state, name, rng)
 
 
 @APP.get("/health")
@@ -178,47 +420,27 @@ def get_availability(sku_id: str, days: int = Query(5, ge=0)):
 	if state is None:
 		raise HTTPException(status_code=404, detail="SKU not found")
 
-	incoming_available = (
-		state["incoming_quantity"]
-		if state["incoming_exists"] and state["incoming_eta_days"] <= days
-		else 0
-	)
-	expected_demand_for_feasibility = ceil(state["mu"] * days)
-	available = (
-		state["on_hand"]
-		- state["reserved"]
-		+ incoming_available
-		- expected_demand_for_feasibility
-	)
+	availability = available_for_window(state, days)
 	return {
 		"sku_id": sku_id,
 		"days": days,
 		"on_hand": state["on_hand"],
 		"reserved": state["reserved"],
-		"incoming_available": incoming_available,
-		"expected_demand_for_feasibility": expected_demand_for_feasibility,
-		"available": available,
+		**availability,
 	}
 
 
 @APP.get("/buyer-request/{sku_id}")
 def get_buyer_request_quantity(sku_id: str):
-	state = APP.state.merchant_states_by_sku.get(sku_id)
-	if state is None:
+	if sku_id not in APP.state.merchant_states_by_sku:
 		raise HTTPException(status_code=404, detail="SKU not found")
+	return build_buyer_request(sku_id)
 
-	quantity = generate_buyer_request_quantity(state["mu"])
-	sku = APP.state.skus_by_sku[sku_id]
-	budget = generate_buyer_budget(quantity["requested_quantity"], sku["current_price"])
-	deadline_days = generate_buyer_deadline(APP.state.buyer_deadline_rng)
-	return {
-		"sku_id": sku_id,
-		"mu": state["mu"],
-		**quantity,
-		"current_price": sku["current_price"],
-		**budget,
-		"deadline_days": deadline_days,
-	}
+
+@APP.get("/buyer-request")
+def get_buyer_request():
+	target_sku = select_target_sku(APP.state.catalog_skus, APP.state.buyer_target_rng)
+	return build_buyer_request(target_sku["sku_id"])
 
 
 app = APP
