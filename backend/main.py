@@ -1,7 +1,9 @@
 from pathlib import Path
 from typing import List, Dict
+from bisect import bisect_right
 from math import ceil, log
 from functools import lru_cache
+from types import MappingProxyType
 import random
 
 import numpy as np
@@ -36,6 +38,9 @@ SUBSTITUTION_SEED = EXPERIMENT_SEED + 5
 BUYER_QUANTITY_SEED = EXPERIMENT_SEED + 6
 BUYER_BUDGET_SEED = EXPERIMENT_SEED + 7
 BUYER_DEADLINE_SEED = EXPERIMENT_SEED + 8
+CDF_BASE_SEED = 20260901
+CDF_WINDOW_DAYS = (2, 3, 5, 7, 10)
+CDF_SAMPLE_SIZE = 10_000
 FLEXIBILITY_PROBABILITIES = (0.50, 0.35, 0.15)
 PRICE_FLEXIBILITY_CHOICES = (("Low", 0.02), ("Medium", 0.05), ("High", 0.10))
 QUANTITY_FLEXIBILITY_CHOICES = (("Low", 0.10), ("Medium", 0.25), ("High", 0.50))
@@ -149,6 +154,39 @@ def simulate_demand_window(
 		"daily_demand": daily_demand,
 		"cumulative_demand": sum(daily_demand),
 	}
+
+
+@lru_cache(maxsize=1)
+def build_demand_cdf_cache() -> MappingProxyType:
+	"""Build immutable empirical cumulative-demand CDFs for all locked SKUs."""
+	merchant_states = load_locked_data()["merchant_states"]
+	cache = {}
+	for sku_index, state in enumerate(merchant_states):
+		for window_index, window_days in enumerate(CDF_WINDOW_DAYS):
+			seed = CDF_BASE_SEED + sku_index * 100 + window_index
+			rng = np.random.default_rng(seed)
+			samples = sorted(
+				simulate_demand_window(
+					state["mu"], state["nb_k"], window_days, rng
+				)["cumulative_demand"]
+				for _ in range(CDF_SAMPLE_SIZE)
+			)
+			cache[(state["sku_id"], window_days)] = tuple(samples)
+	return MappingProxyType(cache)
+
+
+def get_demand_cdf(sku_id: str, window_days: int) -> tuple[int, ...]:
+	"""Return the fixed empirical cumulative-demand samples for a SKU/window."""
+	try:
+		return build_demand_cdf_cache()[(sku_id, window_days)]
+	except KeyError as error:
+		raise ValueError("Unknown SKU or unsupported delivery window") from error
+
+
+def demand_percentile(sku_id: str, window_days: int, cumulative_demand: int) -> float:
+	"""Return the empirical fraction of cached samples less than or equal to demand."""
+	samples = get_demand_cdf(sku_id, window_days)
+	return bisect_right(samples, cumulative_demand) / len(samples)
 
 
 def generate_buyer_request_quantity(mu: float, rng: random.Random) -> Dict:
