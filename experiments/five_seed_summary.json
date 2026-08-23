@@ -1,0 +1,184 @@
+{
+  "experiment_seeds": [
+    20260821,
+    20260822,
+    20260823,
+    20260824,
+    20260825
+  ],
+  "five_seed_aggregate": {
+    "per_seed_metric_distribution": {
+      "accept_count": {
+        "max": 79,
+        "mean": 78,
+        "min": 77,
+        "std": 0.8944271909999159
+      },
+      "constraint_conflict_rescue_count": {
+        "max": 8,
+        "mean": 7,
+        "min": 6,
+        "std": 0.8944271909999159
+      },
+      "negotiate_count": {
+        "max": 12,
+        "mean": 11,
+        "min": 10,
+        "std": 0.6324555320336759
+      },
+      "reject_count": {
+        "max": 12,
+        "mean": 11,
+        "min": 10,
+        "std": 0.6324555320336759
+      },
+      "risk_gate_rejection_count": {
+        "max": 614,
+        "mean": 495.4,
+        "min": 367,
+        "std": 87.44735559180735
+      },
+      "runtime_seconds": {
+        "max": 51.648497999995016,
+        "mean": 43.99961384003982,
+        "min": 37.68623710004613,
+        "std": 4.8727749330234555
+      },
+      "total_candidates_evaluated": {
+        "max": 984,
+        "mean": 821.6,
+        "min": 696,
+        "std": 99.81302520212479
+      },
+      "total_selected_expected_net_contribution": {
+        "max": 14677563.635278609,
+        "mean": 13654908.123803386,
+        "min": 12642148.578448415,
+        "std": 732528.8894594351
+      },
+      "total_selected_p05_net_contribution": {
+        "max": 13702246.925918698,
+        "mean": 12598728.840924837,
+        "min": 11677587.9111155,
+        "std": 685598.2377983194
+      }
+    },
+    "total_accept_count": 390,
+    "total_candidates_evaluated": 4108,
+    "total_negotiate_count": 55,
+    "total_reject_count": 55,
+    "total_requests": 500,
+    "total_rescued_constraint_conflict_requests": 35,
+    "total_risk_gate_rejection_count": 2477,
+    "total_runtime_seconds": 219.9980692001991
+  },
+  "monte_carlo_paths_per_candidate": 10000,
+  "per_seed": {
+    "20260821": {
+      "accept_count": 79,
+      "average_candidates_per_request": 8.6,
+      "average_selected_expected_net_contribution_per_request": 130845.87295073885,
+      "average_selected_p05_net_contribution_per_request": 123044.47905096685,
+      "baseline_accept_count": 14,
+      "constraint_conflict_count": 10,
+      "constraint_conflict_rescue_count": 6,
+      "hard_reject_count": 7,
+      "monte_carlo_paths_per_candidate": 10000,
+      "negotiate_count": 10,
+      "opportunity_count": 69,
+      "reject_count": 11,
+      "requests_processed": 100,
+      "risk_gate_rejection_count": 550,
+      "runtime_seconds": 46.08580040000379,
+      "total_candidates_evaluated": 860,
+      "total_negotiable_candidates": 777,
+      "total_selected_expected_net_contribution": 13084587.295073885,
+      "total_selected_p05_net_contribution": 12304447.905096686
+    },
+    "20260822": {
+      "accept_count": 77,
+      "average_candidates_per_request": 9.84,
+      "average_selected_expected_net_contribution_per_request": 141892.689533,
+      "average_selected_p05_net_contribution_per_request": 129638.0,
+      "baseline_accept_count": 15,
+      "constraint_conflict_count": 10,
+      "constraint_conflict_rescue_count": 8,
+      "hard_reject_count": 10,
+      "monte_carlo_paths_per_candidate": 10000,
+      "negotiate_count": 11,
+      "opportunity_count": 65,
+      "reject_count": 12,
+      "requests_processed": 100,
+      "risk_gate_rejection_count": 614,
+      "runtime_seconds": 51.648497999995016,
+      "total_candidates_evaluated": 984,
+      "total_negotiable_candidates": 904,
+      "total_selected_expected_net_contribution": 14189268.9533,
+      "total_selected_p05_net_contribution": 12963800.0
+    },
+    "20260823": {
+      "accept_count": 78,
+      "average_candidates_per_request": 7.43,
+      "average_selected_expected_net_contribution_per_request": 146775.6363527861,
+      "average_selected_p05_net_contribution_per_request": 137022.469259187,
+      "baseline_accept_count": 26,
+      "constraint_conflict_count": 8,
+      "constraint_conflict_rescue_count": 6,
+      "hard_reject_count": 9,
+      "monte_carlo_paths_per_candidate": 10000,
+      "negotiate_count": 11,
+      "opportunity_count": 57,
+      "reject_count": 11,
+      "requests_processed": 100,
+      "risk_gate_rejection_count": 430,
+      "runtime_seconds": 40.03606250009034,
+      "total_candidates_evaluated": 743,
+      "total_negotiable_candidates": 660,
+      "total_selected_expected_net_contribution": 14677563.635278609,
+      "total_selected_p05_net_contribution": 13702246.925918698
+    },
+    "20260824": {
+      "accept_count": 77,
+      "average_candidates_per_request": 6.96,
+      "average_selected_expected_net_contribution_per_request": 126421.48578448415,
+      "average_selected_p05_net_contribution_per_request": 116775.879111155,
+      "baseline_accept_count": 14,
+      "constraint_conflict_count": 9,
+      "constraint_conflict_rescue_count": 8,
+      "hard_reject_count": 10,
+      "monte_carlo_paths_per_candidate": 10000,
+      "negotiate_count": 12,
+      "opportunity_count": 67,
+      "reject_count": 11,
+      "requests_processed": 100,
+      "risk_gate_rejection_count": 367,
+      "runtime_seconds": 37.68623710004613,
+      "total_candidates_evaluated": 696,
+      "total_negotiable_candidates": 615,
+      "total_selected_expected_net_contribution": 12642148.578448415,
+      "total_selected_p05_net_contribution": 11677587.9111155
+    },
+    "20260825": {
+      "accept_count": 79,
+      "average_candidates_per_request": 8.25,
+      "average_selected_expected_net_contribution_per_request": 136809.7215691603,
+      "average_selected_p05_net_contribution_per_request": 123455.61462493296,
+      "baseline_accept_count": 14,
+      "constraint_conflict_count": 8,
+      "constraint_conflict_rescue_count": 7,
+      "hard_reject_count": 9,
+      "monte_carlo_paths_per_candidate": 10000,
+      "negotiate_count": 11,
+      "opportunity_count": 69,
+      "reject_count": 10,
+      "requests_processed": 100,
+      "risk_gate_rejection_count": 516,
+      "runtime_seconds": 44.541471200063825,
+      "total_candidates_evaluated": 825,
+      "total_negotiable_candidates": 742,
+      "total_selected_expected_net_contribution": 13680972.156916028,
+      "total_selected_p05_net_contribution": 12345561.462493297
+    }
+  },
+  "reproducibility_20260821": true
+}

@@ -1,10 +1,14 @@
 from pathlib import Path
-from typing import List, Dict
+from typing import Callable, Dict, List, Optional, Sequence
 from bisect import bisect_right
 from math import ceil, isfinite, log
 from functools import lru_cache
+from hashlib import sha256
 from types import MappingProxyType
+from collections import Counter
+import json
 import random
+from time import perf_counter
 
 import numpy as np
 import pandas as pd
@@ -47,6 +51,8 @@ QUANTITY_FLEXIBILITY_CHOICES = (("Low", 0.10), ("Medium", 0.25), ("High", 0.50))
 TIMING_FLEXIBILITY_CHOICES = (("Low", 0), ("Medium", 2), ("High", 3))
 SUBSTITUTION_TOLERANCE_VALUES = (0, 1)
 SUBSTITUTION_TOLERANCE_PROBABILITIES = (0.60, 0.40)
+DECISION_MONTE_CARLO_PATHS = 10_000
+ACTION_PRIORITY = {"PRICE": 0, "QUANTITY": 1, "TIMING": 2, "SUBSTITUTION": 3, "BASELINE": 4}
 
 
 def get_data_path() -> Path:
@@ -235,8 +241,14 @@ def evaluate_candidate_monte_carlo(
 	candidate_price: float,
 	paths: int,
 	seed: int,
+	include_path_results: bool = True,
 ) -> Dict:
-	"""Evaluate one fixed candidate across independent demand and return paths."""
+	"""Evaluate one fixed candidate across independent demand and return paths.
+
+	``include_path_results=False`` preserves every stochastic draw and aggregate,
+	but avoids allocating path dictionaries when only aggregate metrics and P05
+	are needed by the decision engine.
+	"""
 	if delivery_window_days < 0:
 		raise ValueError("delivery_window_days must be non-negative")
 	if requested_quantity < 0:
@@ -259,7 +271,15 @@ def evaluate_candidate_monte_carlo(
 		else 0
 	)
 	contribution_per_unit = candidate_price - sku["unit_cost"]
-	path_results = []
+	path_results = [] if include_path_results else None
+	net_contributions = []
+	sla_miss_count = 0
+	return_path_count = 0
+	fulfilled_total = 0
+	returned_total = 0
+	gross_total = 0.0
+	return_loss_total = 0.0
+	net_total = 0.0
 
 	for path_id in range(1, paths + 1):
 		demand = simulate_demand_window(
@@ -282,18 +302,27 @@ def evaluate_candidate_monte_carlo(
 		)
 		gross_contribution = fulfilled_units * contribution_per_unit
 		net_contribution = gross_contribution - returns["return_loss"]
-		path_results.append({
-			"path_id": path_id,
-			"daily_demand": demand["daily_demand"],
-			"cumulative_demand": demand["cumulative_demand"],
-			"simulated_available": simulated_available,
-			"fulfilled_units": fulfilled_units,
-			"sla_missed": sla_missed,
-			"returned_units": returns["returned_units"],
-			"return_loss": returns["return_loss"],
-			"gross_contribution": gross_contribution,
-			"net_contribution": net_contribution,
-		})
+		sla_miss_count += sla_missed
+		return_path_count += returns["returned_units"] > 0
+		fulfilled_total += fulfilled_units
+		returned_total += returns["returned_units"]
+		gross_total += gross_contribution
+		return_loss_total += returns["return_loss"]
+		net_total += net_contribution
+		net_contributions.append(net_contribution)
+		if include_path_results:
+			path_results.append({
+				"path_id": path_id,
+				"daily_demand": demand["daily_demand"],
+				"cumulative_demand": demand["cumulative_demand"],
+				"simulated_available": simulated_available,
+				"fulfilled_units": fulfilled_units,
+				"sla_missed": sla_missed,
+				"returned_units": returns["returned_units"],
+				"return_loss": returns["return_loss"],
+				"gross_contribution": gross_contribution,
+				"net_contribution": net_contribution,
+			})
 
 	return {
 		"sku_id": sku_id,
@@ -301,31 +330,282 @@ def evaluate_candidate_monte_carlo(
 		"requested_quantity": requested_quantity,
 		"candidate_price": candidate_price,
 		"paths": paths,
-		"sla_success_probability": sum(
-			not result["sla_missed"] for result in path_results
-		) / paths,
-		"sla_miss_probability": sum(
-			result["sla_missed"] for result in path_results
-		) / paths,
-		"return_probability": sum(
-			result["returned_units"] > 0 for result in path_results
-		) / paths,
-		"expected_fulfilled_units": sum(
-			result["fulfilled_units"] for result in path_results
-		) / paths,
-		"expected_returned_units": sum(
-			result["returned_units"] for result in path_results
-		) / paths,
-		"expected_gross_contribution": sum(
-			result["gross_contribution"] for result in path_results
-		) / paths,
-		"expected_return_loss": sum(
-			result["return_loss"] for result in path_results
-		) / paths,
-		"expected_net_contribution": sum(
-			result["net_contribution"] for result in path_results
-		) / paths,
+		"sla_success_probability": (paths - sla_miss_count) / paths,
+		"sla_miss_probability": sla_miss_count / paths,
+		"return_probability": return_path_count / paths,
+		"expected_fulfilled_units": fulfilled_total / paths,
+		"expected_returned_units": returned_total / paths,
+		"expected_gross_contribution": gross_total / paths,
+		"expected_return_loss": return_loss_total / paths,
+		"expected_net_contribution": net_total / paths,
 		"path_results": path_results,
+		"net_contributions": net_contributions,
+	}
+
+
+def buyer_total_ceiling(request: Dict) -> float:
+	return request["budget"] * (1 + request["price_tolerance_pct"])
+
+
+def build_price_grid(lower_bound: float, upper_bound: float) -> List[float]:
+	if upper_bound < lower_bound:
+		return []
+	if upper_bound == lower_bound:
+		return [lower_bound]
+	return [lower_bound + (upper_bound - lower_bound) * index / 4 for index in range(5)]
+
+
+def build_baseline_reference(request: Dict) -> Dict:
+	"""Build the status-quo reference; it is explicitly ceiling-exempt."""
+	sku = load_locked_data()["catalog_skus_by_sku"][request["target_sku_id"]]
+	return {
+		"sku_id": request["target_sku_id"], "quantity": request["requested_quantity"],
+		"delivery_window_days": request["deadline_days"], "candidate_price": sku["current_price"],
+		"action_type": "BASELINE",
+	}
+
+
+def build_decision_candidates(request: Dict) -> List[Dict]:
+	"""Build ceiling-constrained single-lever MIRROR alternatives only."""
+	data = load_locked_data()
+	catalog, states = data["catalog_skus_by_sku"], data["merchant_states_by_sku"]
+	target_id, quantity, deadline = request["target_sku_id"], request["requested_quantity"], request["deadline_days"]
+	ceiling, target = buyer_total_ceiling(request), catalog[target_id]
+	candidates = []
+	def add(sku_id, candidate_quantity, window, price, action):
+		sku = catalog[sku_id]
+		if (candidate_quantity > 0 and candidate_quantity <= available_for_window(states[sku_id], window)["available"]
+			and price >= sku["minimum_price"] and price * candidate_quantity <= ceiling):
+			candidates.append({"sku_id": sku_id, "quantity": candidate_quantity,
+				"delivery_window_days": window, "candidate_price": price, "action_type": action})
+	for price in build_price_grid(target["minimum_price"], min(target["current_price"], ceiling / quantity)):
+		add(target_id, quantity, deadline, price, "PRICE")
+	q_alt = max(1, ceil(quantity * (1 - request["quantity_tolerance_pct"])))
+	add(target_id, q_alt, deadline, target["current_price"], "QUANTITY")
+	add(target_id, quantity, deadline + request["timing_tolerance_days"], target["current_price"], "TIMING")
+	for sku_id in request["eligible_substitute_skus"]:
+		sku, substitute_quantity = catalog[sku_id], min(quantity, max(0, available_for_window(states[sku_id], deadline)["available"]))
+		if substitute_quantity:
+			for price in build_price_grid(sku["minimum_price"], min(sku["current_price"], ceiling / substitute_quantity)):
+				add(sku_id, substitute_quantity, deadline, price, "SUBSTITUTION")
+	return candidates
+
+
+def candidate_scenario_seed(experiment_seed: int, request: Dict, candidate: Dict) -> int:
+	"""Stable SKU/window scenario identity provides common random numbers where applicable."""
+	text = f"{experiment_seed}|{request['experiment_seed']}|{request['request_id']}|{candidate['sku_id']}|{candidate['delivery_window_days']}"
+	return int.from_bytes(sha256(text.encode()).digest()[:8], "big")
+
+
+def empirical_p05(net_contributions: Sequence[float]) -> float:
+	"""Return the locked nearest-rank empirical P05 from path net values."""
+	values = sorted(net_contributions)
+	return values[ceil(len(values) * .05) - 1]
+
+
+def candidate_passes_risk_gate(candidate_p05: float, reference_p05: float) -> bool:
+	return candidate_p05 >= reference_p05 - .10 * abs(reference_p05)
+
+
+def score_candidate(expected_net: float, candidate_p05: float, reference_p05: float) -> float:
+	return expected_net - max(0, reference_p05 - candidate_p05)
+
+
+def select_best_candidate(candidates: List[Dict]) -> Dict:
+	return min(candidates, key=lambda c: (-c["score"], ACTION_PRIORITY[c["action_type"]]))
+
+
+def decision_from_scores(best_score: float, reference_score: float, baseline_feasible: bool) -> str:
+	if best_score > reference_score + .05 * abs(reference_score):
+		return "NEGOTIATE"
+	return "ACCEPT" if baseline_feasible else "REJECT"
+
+
+def evaluate_decision_candidate(candidate: Dict, request: Dict, experiment_seed: int) -> Dict:
+	scenario_seed = candidate_scenario_seed(experiment_seed, request, candidate)
+	evaluation = evaluate_candidate_monte_carlo(
+		candidate["sku_id"], candidate["delivery_window_days"], candidate["quantity"], candidate["candidate_price"],
+		DECISION_MONTE_CARLO_PATHS, scenario_seed, include_path_results=False,
+	)
+	return {
+		**candidate,
+		**{key: value for key, value in evaluation.items()
+		   if key not in {"path_results", "net_contributions"}},
+		"scenario_seed": scenario_seed,
+		"p05_net_contribution": empirical_p05(evaluation["net_contributions"]),
+	}
+
+
+def evaluate_request_decision(request: Dict, experiment_seed: int) -> Dict:
+	"""Evaluate a frozen request without changing it after observing outcomes."""
+	if request["classification"] == "HARD_REJECT":
+		return {"decision": "REJECT", "reference_type": "NO_DEAL", "reference_score": 0, "reference_p05": 0,
+			"risk_threshold": 0, "candidates": [], "risk_gate_rejections": 0}
+	if request["baseline_feasible"]:
+		reference = evaluate_decision_candidate(build_baseline_reference(request), request, experiment_seed)
+		reference_type = "BASELINE"
+	else:
+		reference, reference_type = {"expected_net_contribution": 0, "p05_net_contribution": 0, "score": 0}, "NO_DEAL"
+	reference_p05 = reference["p05_net_contribution"]
+	reference_score = reference["expected_net_contribution"] if reference_type == "BASELINE" else 0
+	evaluated = [evaluate_decision_candidate(c, request, experiment_seed) for c in build_decision_candidates(request)]
+	for candidate in evaluated:
+		candidate["passes_risk_gate"] = candidate_passes_risk_gate(candidate["p05_net_contribution"], reference_p05)
+		if candidate["passes_risk_gate"]:
+			candidate["score"] = score_candidate(candidate["expected_net_contribution"], candidate["p05_net_contribution"], reference_p05)
+	survivors = [candidate for candidate in evaluated if candidate["passes_risk_gate"]]
+	best = select_best_candidate(survivors) if survivors else None
+	best_score = best["score"] if best else 0
+	return {"decision": decision_from_scores(best_score, reference_score, request["baseline_feasible"]),
+		"reference_type": reference_type, "reference_score": reference_score, "reference_p05": reference_p05,
+		"risk_threshold": reference_p05 - .10 * abs(reference_p05), "best_candidate": best,
+		"reference": reference, "candidates": evaluated, "risk_gate_rejections": len(evaluated) - len(survivors)}
+
+
+def get_buyer_request_data_path() -> Path:
+	return Path(__file__).resolve().parents[1] / "data" / "mirror_buyer_requests_5seeds_v1.csv"
+
+
+@lru_cache(maxsize=1)
+def load_buyer_request_population_data() -> tuple[MappingProxyType, ...]:
+	"""Load the frozen 500-request population once for decision evaluation."""
+	csv_path = get_buyer_request_data_path()
+	if not csv_path.exists():
+		raise RuntimeError(f"Buyer request CSV not found at {csv_path}")
+	requests = []
+	for record in pd.read_csv(csv_path).to_dict(orient="records"):
+		record["eligible_substitute_skus"] = tuple(json.loads(record["eligible_substitute_skus"]))
+		record["baseline_feasible"] = bool(record["baseline_feasible"])
+		requests.append(MappingProxyType(record))
+	if len(requests) != 500:
+		raise RuntimeError(f"Buyer request CSV must contain exactly 500 rows (found {len(requests)})")
+	return tuple(requests)
+
+
+def selected_transaction_metrics(result: Dict) -> Optional[Dict]:
+	"""Return the transaction selected by the frozen final decision rule."""
+	if result["decision"] == "NEGOTIATE":
+		return result["best_candidate"]
+	if result["decision"] == "ACCEPT":
+		return result["reference"]
+	return None
+
+
+def evaluate_decision_seed(
+	experiment_seed: int,
+	request_order: Optional[Sequence[int]] = None,
+	progress_callback: Optional[Callable[[int, int, int], None]] = None,
+	progress_every: int = 25,
+) -> Dict:
+	"""Incrementally evaluate one frozen 100-request experiment seed.
+
+	Only compact per-candidate aggregates are retained; 10,000 path objects are
+	never accumulated across requests. ``request_order`` is test-only support for
+	verifying order independence and has no effect on scenario seeds.
+	"""
+	requests = [
+		dict(request) for request in load_buyer_request_population_data()
+		if request["experiment_seed"] == experiment_seed
+	]
+	if len(requests) != 100:
+		raise ValueError(f"Expected 100 requests for seed {experiment_seed}, found {len(requests)}")
+	if request_order is not None:
+		by_id = {request["request_id"]: request for request in requests}
+		if set(request_order) != set(by_id) or len(request_order) != len(by_id):
+			raise ValueError("request_order must contain each request_id exactly once")
+		requests = [by_id[request_id] for request_id in request_order]
+
+	started = perf_counter()
+	class_counts = Counter()
+	decision_counts = Counter()
+	selected_totals = Counter()
+	candidate_count = 0
+	baseline_evaluation_count = 0
+	risk_gate_rejections = 0
+	constraint_conflict_count = 0
+	constraint_conflict_negotiated = 0
+	improvement_total = 0.0
+	results_by_request_id = {}
+
+	for completed, request in enumerate(requests, start=1):
+		result = evaluate_request_decision(request, experiment_seed)
+		results_by_request_id[request["request_id"]] = result
+		class_counts[request["classification"]] += 1
+		decision_counts[result["decision"]] += 1
+		candidate_count += len(result["candidates"])
+		baseline_evaluation_count += result["reference_type"] == "BASELINE"
+		risk_gate_rejections += result["risk_gate_rejections"]
+		if request["classification"] == "CONSTRAINT_CONFLICT":
+			constraint_conflict_count += 1
+			constraint_conflict_negotiated += result["decision"] == "NEGOTIATE"
+		selected = selected_transaction_metrics(result)
+		if selected is not None:
+			for metric in (
+				"expected_net_contribution", "p05_net_contribution",
+				"expected_gross_contribution", "expected_return_loss",
+				"sla_success_probability", "sla_miss_probability",
+				"return_probability", "expected_returned_units",
+			):
+				selected_totals[metric] += selected[metric]
+			improvement_total += selected["expected_net_contribution"] - result["reference"]["expected_net_contribution"]
+		if progress_callback and (completed % progress_every == 0 or completed == len(requests)):
+			progress_callback(experiment_seed, completed, len(requests))
+
+	total_requests = len(requests)
+	selected_count = sum(decision_counts[decision] for decision in ("ACCEPT", "NEGOTIATE"))
+	return {
+		"experiment_seed": experiment_seed,
+		"requests": total_requests,
+		"runtime_seconds": perf_counter() - started,
+		"class_counts": dict(class_counts),
+		"decision_counts": dict(decision_counts),
+		"candidate_count": candidate_count,
+		"baseline_evaluation_count": baseline_evaluation_count,
+		"candidate_evaluation_count": candidate_count + baseline_evaluation_count,
+		"risk_gate_rejections": risk_gate_rejections,
+		"selected_transaction_count": selected_count,
+		"average_selected_expected_net_contribution": (
+			selected_totals["expected_net_contribution"] / selected_count if selected_count else 0
+		),
+		"average_selected_p05_net_contribution": (
+			selected_totals["p05_net_contribution"] / selected_count if selected_count else 0
+		),
+		"average_selected_expected_gross_contribution": (
+			selected_totals["expected_gross_contribution"] / selected_count if selected_count else 0
+		),
+		"average_selected_expected_return_loss": (
+			selected_totals["expected_return_loss"] / selected_count if selected_count else 0
+		),
+		"average_selected_sla_success_probability": (
+			selected_totals["sla_success_probability"] / selected_count if selected_count else 0
+		),
+		"average_selected_sla_miss_probability": (
+			selected_totals["sla_miss_probability"] / selected_count if selected_count else 0
+		),
+		"average_selected_return_probability": (
+			selected_totals["return_probability"] / selected_count if selected_count else 0
+		),
+		"average_selected_expected_returned_units": (
+			selected_totals["expected_returned_units"] / selected_count if selected_count else 0
+		),
+		"constraint_conflict_rescue_rate": (
+			constraint_conflict_negotiated / constraint_conflict_count if constraint_conflict_count else 0
+		),
+		"average_selected_vs_reference_expected_net_improvement": improvement_total / total_requests,
+		"hard_reject_rate": class_counts["HARD_REJECT"] / total_requests,
+		"results_by_request_id": results_by_request_id,
+	}
+
+
+def evaluate_all_decision_seeds(
+	seeds: Sequence[int] = (20260821, 20260822, 20260823, 20260824, 20260825),
+	progress_callback: Optional[Callable[[int, int, int], None]] = None,
+	progress_every: int = 25,
+) -> Dict[int, Dict]:
+	"""Evaluate every requested frozen experiment seed independently."""
+	return {
+		seed: evaluate_decision_seed(seed, progress_callback=progress_callback, progress_every=progress_every)
+		for seed in seeds
 	}
 
 
