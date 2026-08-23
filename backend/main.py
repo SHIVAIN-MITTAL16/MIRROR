@@ -197,6 +197,37 @@ def sla_miss_probability(demand_percentile: float) -> float:
 	return min(0.14, 0.05 + 0.30 * max(0.0, percentile - 0.70))
 
 
+def get_return_probability(sla_missed: bool) -> float:
+	"""Return the locked probability conditional on the actual SLA outcome."""
+	return 0.15 if sla_missed else 0.06
+
+
+def calculate_return_loss(
+	returned_units: int,
+	candidate_price: float,
+	unit_cost: float,
+) -> float:
+	"""Calculate the locked 30% unrecovered candidate contribution loss."""
+	return returned_units * (candidate_price - unit_cost) * 0.30
+
+
+def simulate_returns(
+	fulfilled_units: int,
+	sla_missed: bool,
+	candidate_price: float,
+	unit_cost: float,
+	rng: np.random.Generator,
+) -> Dict:
+	"""Sample returned units after SLA resolution and calculate candidate-price loss."""
+	if fulfilled_units < 0:
+		raise ValueError("fulfilled_units must be non-negative")
+	returned_units = int(rng.binomial(fulfilled_units, get_return_probability(sla_missed)))
+	return {
+		"returned_units": returned_units,
+		"return_loss": calculate_return_loss(returned_units, candidate_price, unit_cost),
+	}
+
+
 def generate_buyer_request_quantity(mu: float, rng: random.Random) -> Dict:
 	"""Generate Distribution #6 quantity from the locked SKU demand mean."""
 	q_raw = rng.lognormvariate(log(3 * mu), BUYER_QUANTITY_LOG_SIGMA)
