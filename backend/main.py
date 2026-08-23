@@ -228,6 +228,107 @@ def simulate_returns(
 	}
 
 
+def evaluate_candidate_monte_carlo(
+	sku_id: str,
+	delivery_window_days: int,
+	requested_quantity: int,
+	candidate_price: float,
+	paths: int,
+	seed: int,
+) -> Dict:
+	"""Evaluate one fixed candidate across independent demand and return paths."""
+	if delivery_window_days < 0:
+		raise ValueError("delivery_window_days must be non-negative")
+	if requested_quantity < 0:
+		raise ValueError("requested_quantity must be non-negative")
+	if paths <= 0:
+		raise ValueError("paths must be positive")
+
+	locked_data = load_locked_data()
+	try:
+		state = locked_data["merchant_states_by_sku"][sku_id]
+		sku = locked_data["catalog_skus_by_sku"][sku_id]
+	except KeyError as error:
+		raise ValueError("Unknown SKU") from error
+
+	demand_rng = np.random.default_rng(seed + 1)
+	return_rng = np.random.default_rng(seed + 2)
+	incoming_available = (
+		state["incoming_quantity"]
+		if state["incoming_exists"] and state["incoming_eta_days"] <= delivery_window_days
+		else 0
+	)
+	contribution_per_unit = candidate_price - sku["unit_cost"]
+	path_results = []
+
+	for path_id in range(1, paths + 1):
+		demand = simulate_demand_window(
+			state["mu"], state["nb_k"], delivery_window_days, demand_rng
+		)
+		simulated_available = (
+			state["on_hand"]
+			- state["reserved"]
+			+ incoming_available
+			- demand["cumulative_demand"]
+		)
+		fulfilled_units = min(requested_quantity, max(0, simulated_available))
+		sla_missed = fulfilled_units < requested_quantity
+		returns = simulate_returns(
+			fulfilled_units,
+			sla_missed,
+			candidate_price,
+			sku["unit_cost"],
+			return_rng,
+		)
+		gross_contribution = fulfilled_units * contribution_per_unit
+		net_contribution = gross_contribution - returns["return_loss"]
+		path_results.append({
+			"path_id": path_id,
+			"daily_demand": demand["daily_demand"],
+			"cumulative_demand": demand["cumulative_demand"],
+			"simulated_available": simulated_available,
+			"fulfilled_units": fulfilled_units,
+			"sla_missed": sla_missed,
+			"returned_units": returns["returned_units"],
+			"return_loss": returns["return_loss"],
+			"gross_contribution": gross_contribution,
+			"net_contribution": net_contribution,
+		})
+
+	return {
+		"sku_id": sku_id,
+		"delivery_window_days": delivery_window_days,
+		"requested_quantity": requested_quantity,
+		"candidate_price": candidate_price,
+		"paths": paths,
+		"sla_success_probability": sum(
+			not result["sla_missed"] for result in path_results
+		) / paths,
+		"sla_miss_probability": sum(
+			result["sla_missed"] for result in path_results
+		) / paths,
+		"return_probability": sum(
+			result["returned_units"] > 0 for result in path_results
+		) / paths,
+		"expected_fulfilled_units": sum(
+			result["fulfilled_units"] for result in path_results
+		) / paths,
+		"expected_returned_units": sum(
+			result["returned_units"] for result in path_results
+		) / paths,
+		"expected_gross_contribution": sum(
+			result["gross_contribution"] for result in path_results
+		) / paths,
+		"expected_return_loss": sum(
+			result["return_loss"] for result in path_results
+		) / paths,
+		"expected_net_contribution": sum(
+			result["net_contribution"] for result in path_results
+		) / paths,
+		"path_results": path_results,
+	}
+
+
 def generate_buyer_request_quantity(mu: float, rng: random.Random) -> Dict:
 	"""Generate Distribution #6 quantity from the locked SKU demand mean."""
 	q_raw = rng.lognormvariate(log(3 * mu), BUYER_QUANTITY_LOG_SIGMA)
