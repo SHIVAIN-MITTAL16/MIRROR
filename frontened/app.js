@@ -1,19 +1,41 @@
 import { renderIntelligenceCore } from '/ui/intelligence-core.js';
 import { replayPipeline } from '/ui/decision-pipeline.js';
 
+const freshOverrides = document.createElement('link');
+freshOverrides.rel = 'stylesheet';
+freshOverrides.href = '/ui/core-overrides.css?qa=final';
+document.head.append(freshOverrides);
+
 const $ = selector => document.querySelector(selector);
 const money = value => '₹' + new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(value ?? 0);
 const pct = value => (value * 100).toFixed(2) + '%';
 const pct1 = value => (value * 100).toFixed(1) + '%';
 const get = async url => { const response = await fetch(url); if (!response.ok) throw Error(await response.text()); return response.json(); };
-const state = { rows: [], cancel: null, defaultRow: null };
+const state = { rows: [], cancel: null, defaultRow: null, selectedKey: null };
 const outcomeClass = value => value === 'NEGOTIATE' ? 'negotiate' : value === 'ACCEPT' ? 'accept' : 'reject';
 
 function setRequestObject(detail) {
   const request = detail.buyer_request;
   $('#request-sku').textContent = request.target_sku_id;
   $('#request-stats').innerHTML = '<span>' + request.requested_quantity + ' units</span><span>' + money(request.budget) + '</span><span>Deadline · ' + request.deadline_days + ' days</span>';
+  $('#request-constraints').innerHTML = '<span><b>PROFILE</b>' + request.brand_preference + ' · ' + request.min_ram_gb + 'GB RAM · ' + request.min_storage_gb + 'GB</span><span><b>FULFILMENT</b>' + request.available + ' available · ' + (request.incoming_available ? request.incoming_quantity + ' incoming' : 'no incoming') + '</span><span><b>FLEXIBILITY</b>Price ' + request.price_flexibility + ' · Qty ' + request.quantity_flexibility + ' · Timing ' + request.timing_flexibility + '</span><span><b>ALTERNATIVES</b>' + request.eligible_substitute_skus.length + ' eligible substitutes</span>';
   $('#request-meta').textContent = 'Seed ' + request.experiment_seed + ' · Request ' + request.request_id + ' · ' + request.classification;
+}
+
+function setHeroState(detail) {
+  const result = detail.decision;
+  const candidate = result.best_candidate;
+  const label = result.decision + (candidate ? ' · ' + candidate.action_type : result.classification ? ' · ' + result.classification : '');
+  $('#hero-state').textContent = 'REQUEST ' + detail.buyer_request.request_id + ' · ' + label;
+  $('#hero-state').className = 'hero-state ' + outcomeClass(result.decision);
+  renderIntelligenceCore($('#hero-core'), detail, 'hero');
+}
+
+function setRiskSelection(detail) {
+  const result = detail.decision;
+  const candidate = result.best_candidate || result.reference;
+  $('#risk-selected-value').textContent = candidate ? money(candidate.p05_net_contribution) + ' / ' + money(candidate.expected_net_contribution) : '—';
+  $('#risk-selected-name').textContent = candidate ? candidate.sku_id : 'NO SAFE DEAL';
 }
 
 function setTransaction(detail) {
@@ -39,7 +61,7 @@ function setPayment(detail) {
 }
 
 function renderStage(detail, phase) {
-  renderIntelligenceCore($('#pipeline-core'), detail, phase < 2 ? 'compact' : 'pipeline');
+  renderIntelligenceCore($('#pipeline-core'), detail, 'pipeline');
 }
 
 async function select(seed, requestId) {
@@ -47,18 +69,26 @@ async function select(seed, requestId) {
   $('#seed').value = seed;
   $('#request-id').value = requestId;
   const detail = await get('/dashboard/request/' + seed + '/' + requestId);
+  state.selectedKey = seed + ':' + requestId;
   setRequestObject(detail);
+  setHeroState(detail);
+  setRiskSelection(detail);
   renderIntelligenceCore($('#request-core'), detail, 'compact');
   renderStage(detail, 0);
   state.cancel = replayPipeline($('#pipeline-stages'), detail.decision, phase => renderStage(detail, phase), () => renderStage(detail, 6));
   $('#explain').innerHTML = detail.explanation.map(item => '<li>' + item + '</li>').join('');
   setTransaction(detail);
   setPayment(detail);
+  populateExplorer();
 }
 
 function populateExplorer() {
   const body = $('#rows');
-  body.innerHTML = state.rows.map(row => '<tr tabindex="0" data-seed="' + row.seed + '" data-id="' + row.request_id + '"><td>' + row.seed + '</td><td>' + row.request_id + '</td><td><i class="dot" style="background:' + (row.classification === 'HARD_REJECT' ? 'var(--reject)' : row.classification === 'CONSTRAINT_CONFLICT' ? 'var(--negotiate)' : 'var(--signal-cyan)') + '"></i>' + row.classification + '</td><td class="decision-' + outcomeClass(row.decision) + '">' + row.decision + '</td><td>' + (row.lever || '—') + '</td><td class="data">' + money(row.expected_net_contribution) + '</td></tr>').join('');
+  const decision = $('#decision-filter').value;
+  const classification = $('#class-filter').value;
+  const rows = state.rows.filter(row => (decision === 'ALL' || row.decision === decision) && (classification === 'ALL' || row.classification === classification));
+  body.innerHTML = rows.map(row => '<tr tabindex="0" class="' + (state.selectedKey === row.seed + ':' + row.request_id ? 'selected-row' : '') + '" data-seed="' + row.seed + '" data-id="' + row.request_id + '"><td>' + row.seed + '</td><td>' + row.request_id + '</td><td><i class="dot" style="background:' + (row.classification === 'HARD_REJECT' ? 'var(--reject)' : row.classification === 'CONSTRAINT_CONFLICT' ? 'var(--negotiate)' : 'var(--signal-cyan)') + '"></i>' + row.classification + '</td><td class="decision-' + outcomeClass(row.decision) + '">' + row.decision + '</td><td>' + (row.lever || '—') + '</td><td class="data">' + money(row.expected_net_contribution) + '</td></tr>').join('');
+  $('#selected-identity').textContent = state.selectedKey ? 'SELECTED · ' + state.selectedKey.replace(':', ' / REQUEST ') : 'SELECT A ROW TO REPLAY';
   body.querySelectorAll('tr[data-seed]').forEach(row => {
     row.onclick = () => { select(row.dataset.seed, row.dataset.id); $('#request').scrollIntoView(); };
     row.onkeydown = event => event.key === 'Enter' && row.click();
@@ -69,23 +99,28 @@ function renderAggregate(analysis, levers, rows, metrics) {
   const global = analysis.global_experiment_summary;
   const seeds = Object.keys(analysis.five_seed_stability.per_seed);
   $('#mean-uplift').textContent = pct(metrics.mean_seed_uplift);
-  $('#seed-network').innerHTML = seeds.map((seed, index) => '<span class="seed-node">' + seed.slice(-2) + '</span>' + (index < seeds.length - 1 ? '<i></i>' : '')).join('');
+  $('#seed-network').innerHTML = seeds.map((seed, index) => { const seedResult = analysis.five_seed_stability.per_seed[seed]; return '<span class="seed-node"><b>' + seed.slice(-2) + '</b><small>A ' + pct1(seedResult.accept_pct) + ' · N ' + pct1(seedResult.negotiate_pct) + ' · R ' + pct1(seedResult.reject_pct) + '</small></span>' + (index < seeds.length - 1 ? '<i></i>' : ''); }).join('');
   $('#seed-proof').textContent = metrics.positive_seed_count + ' / ' + seeds.length + ' seeds positive · ' + metrics.at_least_five_pct_seed_count + ' / ' + seeds.length + ' seeds achieved at least 5% uplift.';
   $('#pooled-uplift').textContent = pct(metrics.pooled_uplift);
   $('#feasible-value').textContent = money(metrics.baseline_reference_improvement) + ' · ' + pct(metrics.baseline_reference_improvement_pct);
   $('#feasible-count').textContent = metrics.baseline_reference_count + ' requests with a feasible baseline.';
   $('#recovery-number').textContent = global.constraint_conflict_rescue_count + ' / ' + global.constraint_conflict_count;
   $('#rescue-rate').textContent = pct1(global.constraint_conflict_rescue_rate) + ' rescue rate across Constraint-Conflict requests.';
-  $('#recovery-field').innerHTML = Array.from({ length: global.constraint_conflict_count }, (_, index) => '<i class="recovery-unit ' + (index < global.constraint_conflict_rescue_count ? 'recovered' : '') + '"></i>').join('');
-  const fieldSize = 120;
-  const failed = Math.round(metrics.negotiable_candidate_count * global.risk_gate_rejection_rate);
-  $('#risk-field').innerHTML = Array.from({ length: fieldSize }, (_, index) => '<i class="risk-cell ' + (index < Math.round(fieldSize * failed / metrics.negotiable_candidate_count) ? 'failed' : '') + '"></i>').join('') + '<i class="risk-sweep"></i>';
-  $('#risk-copy').innerHTML = '<b class="data">' + metrics.negotiable_candidate_count + '</b> negotiable candidates were evaluated. <b class="data">' + global.risk_gate_rejections + '</b> failed the P05 risk gate: <b>' + pct1(global.risk_gate_rejection_rate) + '</b>.';
+  $('#recovery-recovered').style.width = pct1(global.constraint_conflict_rescue_rate);
+  $('#recovery-recovered-label').textContent = global.constraint_conflict_rescue_count;
+  $('#recovery-failed-label').textContent = global.constraint_conflict_count - global.constraint_conflict_rescue_count;
+  $('#recovery-total-label').textContent = global.constraint_conflict_count;
+  $('#risk-copy').innerHTML = '<b class="data">' + metrics.negotiable_candidate_count + '</b> candidates evaluated · <b class="data">' + global.risk_gate_rejections + '</b> failed · <b class="data">' + (metrics.negotiable_candidate_count - global.risk_gate_rejections) + '</b> passed the P05 risk gate: <b>' + pct1(global.risk_gate_rejection_rate) + '</b> rejected.';
+  $('#risk-evaluated').textContent = metrics.negotiable_candidate_count;
+  $('#risk-rejected').textContent = global.risk_gate_rejections;
+  $('#risk-passed').textContent = metrics.negotiable_candidate_count - global.risk_gate_rejections;
+  const totalLevers = Object.values(levers.by_action).reduce((sum, item) => sum + item.count, 0);
   const maximum = Math.max(...Object.values(levers.by_action).map(item => item.count), 1);
   $('#lever-tracks').innerHTML = ['SUBSTITUTION','QUANTITY','TIMING','PRICE'].map(action => {
     const count = levers.by_action[action].count;
-    return '<div class="lever-track ' + (count === 0 ? 'zero' : '') + '"><b>' + action + '</b><span style="--width:' + count / maximum * 100 + '%"></span><b class="data">' + count + '</b></div>';
+    return '<div class="lever-track ' + (count === 0 ? 'zero' : '') + '"><b>' + action + '</b><span style="--width:' + count / maximum * 100 + '%"></span><b class="data">' + count + ' <small>' + pct1(count / (totalLevers || 1)) + '</small></b></div>';
   }).join('');
+  $('#lever-total').textContent = totalLevers;
   $('#price-detail').textContent = 'Price candidates were evaluated from the persisted alternatives, but none exceeded the strict improvement threshold. Price candidates evaluated: ' + metrics.price_candidates + ' · Passed the P05 gate: ' + metrics.price_passed_risk_gate + ' · Selected: ' + levers.by_action.PRICE.count + '.';
 }
 
@@ -95,12 +130,16 @@ async function boot() {
   state.rows = rows;
   document.querySelector('.console-head span').textContent = rows.length + ' persisted request decisions';
   [...new Set(rows.map(row => row.seed))].forEach(seed => $('#seed').add(new Option(seed, seed)));
+  [...new Set(rows.map(row => row.classification))].forEach(classification => $('#class-filter').add(new Option(classification, classification)));
   state.defaultRow = rows.find(row => row.decision === 'NEGOTIATE' && row.lever === 'SUBSTITUTION') || rows[0];
   renderAggregate(analysis, levers, rows, metrics);
   populateExplorer();
   $('#load').onclick = () => select($('#seed').value, $('#request-id').value);
   $('#analyze').onclick = () => { select(state.defaultRow.seed, state.defaultRow.request_id); $('#request').scrollIntoView(); };
-  renderIntelligenceCore($('#hero-core'), { decision:'ACCEPT', candidates:[], baseline_feasible:true }, 'compact');
+  $('#decision-filter').onchange = populateExplorer;
+  $('#class-filter').onchange = populateExplorer;
+  $('#clear-filters').onclick = () => { $('#decision-filter').value = 'ALL'; $('#class-filter').value = 'ALL'; populateExplorer(); };
+  renderIntelligenceCore($('#hero-core'), { decision:'REJECT', classification:'IDLE' }, 'hero');
   select(state.defaultRow.seed, state.defaultRow.request_id);
 }
 

@@ -1,7 +1,7 @@
 export function replayPipeline(host, record, onPhase, done) {
   let timer;
   let phase = 0;
-  const labels = ['Buyer request', 'Baseline', 'Candidates', 'Risk gate', 'Survivors', 'Decision'];
+  const labels = ['Buyer request', 'Baseline', 'Candidates', 'Constraint check', 'P05 risk gate', 'Survivors', 'Selected decision'];
   const render = () => {
     host.querySelectorAll('.pipeline-step').forEach((element, index) => {
       element.className = 'pipeline-step ' + (index < phase ? 'done' : index === phase ? 'active' : '');
