@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import List, Dict
 from bisect import bisect_right
-from math import ceil, log
+from math import ceil, isfinite, log
 from functools import lru_cache
 from types import MappingProxyType
 import random
@@ -187,6 +187,14 @@ def demand_percentile(sku_id: str, window_days: int, cumulative_demand: int) -> 
 	"""Return the empirical fraction of cached samples less than or equal to demand."""
 	samples = get_demand_cdf(sku_id, window_days)
 	return bisect_right(samples, cumulative_demand) / len(samples)
+
+
+def sla_miss_probability(demand_percentile: float) -> float:
+	"""Apply the locked SLA-miss formula after clamping a finite percentile to [0, 1]."""
+	if not isfinite(demand_percentile):
+		raise ValueError("demand_percentile must be finite")
+	percentile = min(1.0, max(0.0, demand_percentile))
+	return min(0.14, 0.05 + 0.30 * max(0.0, percentile - 0.70))
 
 
 def generate_buyer_request_quantity(mu: float, rng: random.Random) -> Dict:
