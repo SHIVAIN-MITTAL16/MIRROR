@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 620" fill="none">
+<defs>
+ <linearGradient id="top" x1="120" y1="80" x2="570" y2="260" gradientUnits="userSpaceOnUse"><stop stop-color="#E9FBFA"/><stop offset=".3" stop-color="#B8E3EA"/><stop offset=".72" stop-color="#75AFCB"/><stop offset="1" stop-color="#4D789C"/></linearGradient>
+ <linearGradient id="side" x1="210" y1="260" x2="420" y2="550" gradientUnits="userSpaceOnUse"><stop stop-color="#8ABFD6"/><stop offset=".5" stop-color="#4B789D"/><stop offset="1" stop-color="#203C5D"/></linearGradient>
+ <linearGradient id="shadow" x1="360" y1="270" x2="360" y2="560" gradientUnits="userSpaceOnUse"><stop stop-color="#396686"/><stop offset="1" stop-color="#142B49"/></linearGradient>
+ <radialGradient id="well" cx="0" cy="0" r="1" gradientTransform="translate(360 280) rotate(90) scale(76 142)"><stop stop-color="#254B68"/><stop offset=".65" stop-color="#102A45"/><stop offset="1" stop-color="#071628"/></radialGradient>
+ <linearGradient id="inner" x1="360" y1="150" x2="360" y2="390" gradientUnits="userSpaceOnUse"><stop stop-color="#F5FFFF" stop-opacity=".85"/><stop offset=".35" stop-color="#B5DFE8" stop-opacity=".78"/><stop offset="1" stop-color="#4B7B9E" stop-opacity=".9"/></linearGradient>
+ <filter id="contact" x="-30%" y="-100%" width="160%" height="300%"><feGaussianBlur stdDeviation="18"/></filter>
+ <filter id="depth" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="12" stdDeviation="8" flood-color="#061426" flood-opacity=".55"/></filter>
+</defs>
+<ellipse cx="360" cy="548" rx="246" ry="30" fill="#061426" opacity=".58" filter="url(#contact)"/>
+<!-- suspended upper plate and its thickness -->
+<path d="M164 143 360 52l196 91-196 108-196-108Z" fill="url(#top)" opacity=".92" filter="url(#depth)"/>
+<path d="m164 143 196 108v18L164 160v-17ZM556 143 360 251v18l196-108v-18Z" fill="url(#side)" opacity=".86"/>
+<path d="M185 144 360 63l175 81-175 96-175-96Z" stroke="#F2FFFF" stroke-opacity=".5" stroke-width="3"/>
+<!-- physical connectors -->
+<path d="M232 231v84M488 231v84" stroke="#77B7D1" stroke-width="12" stroke-linecap="round" opacity=".66"/>
+<path d="M232 231v84M488 231v84" stroke="#D6F5F4" stroke-opacity=".52" stroke-width="3" stroke-linecap="round"/>
+<circle cx="232" cy="318" r="13" fill="#315B7B" stroke="#BEEBEA" stroke-width="3"/><circle cx="488" cy="318" r="13" fill="#315B7B" stroke="#BEEBEA" stroke-width="3"/>
+<!-- weighted lower cradle -->
+<path d="M78 337 360 196l282 141-282 150L78 337Z" fill="url(#top)" filter="url(#depth)"/>
+<path d="M78 337v74l282 151v-75L78 337ZM642 337v74L360 562v-75l282-150Z" fill="url(#shadow)"/>
+<path d="m78 337 282 150 282-150v20L360 511 78 357v-20Z" fill="#5D91AF" opacity=".75"/>
+<path d="M103 338 360 210l257 128-257 137L103 338Z" stroke="#E6FCFA" stroke-opacity=".42" stroke-width="3"/>
+<!-- recessed aperture -->
+<path d="m194 331 166-84 166 84-166 85-166-85Z" fill="#0A1C30" opacity=".92"/>
+<path d="m213 331 147-74 147 74-147 75-147-75Z" fill="url(#well)" stroke="#86C7D7" stroke-opacity=".7" stroke-width="3"/>
+<path d="m250 331 110-56 110 56-110 57-110-57Z" fill="#071526" stroke="#D9F8F5" stroke-opacity=".4" stroke-width="2"/>
+<!-- inner precision element -->
+<path d="m360 133 92 198-92 149-92-149 92-198Z" fill="url(#inner)" opacity=".94" filter="url(#depth)"/>
+<path d="m360 157 40 178-40 122-40-122 40-178Z" fill="#F0FFFF" opacity=".24"/>
+<path d="M237 333h246M251 362l109 57 109-57" stroke="#D7F8F4" stroke-opacity=".68" stroke-width="3" stroke-linecap="round"/>
+<circle cx="360" cy="331" r="24" fill="#08192B" stroke="#C7F1EE" stroke-width="4"/><circle cx="360" cy="331" r="9" fill="#C7F1EE"/>
+</svg>
