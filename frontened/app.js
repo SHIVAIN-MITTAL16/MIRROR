@@ -1,6 +1,30 @@
 import { renderIntelligenceCore } from '/ui/intelligence-core.js';
 import { replayPipeline } from '/ui/decision-pipeline.js';
 
+const intro = document.querySelector('#cinematic-intro');
+const introVideo = document.querySelector('#intro-video');
+const skipIntro = document.querySelector('#skip-intro');
+let introClosed = false;
+
+function completeIntro() {
+  if (introClosed) return;
+  introClosed = true;
+  document.body.classList.add('intro-complete');
+  window.setTimeout(() => intro?.remove(), 1100);
+}
+
+if (intro && introVideo) {
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  skipIntro?.addEventListener('click', completeIntro);
+  introVideo.addEventListener('ended', completeIntro, { once: true });
+  introVideo.addEventListener('error', completeIntro, { once: true });
+  if (reducedMotion) {
+    completeIntro();
+  } else {
+    introVideo.play().catch(completeIntro);
+  }
+}
+
 const freshOverrides = document.createElement('link');
 freshOverrides.rel = 'stylesheet';
 freshOverrides.href = '/ui/core-overrides.css?qa=final';
