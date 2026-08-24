@@ -7,13 +7,22 @@ from hashlib import sha256
 from types import MappingProxyType
 from collections import Counter
 import json
+import base64
+import hmac
+import hashlib
+import os
 import random
 from time import perf_counter
+from decimal import Decimal, ROUND_HALF_UP
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.encoders import jsonable_encoder
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 
 APP = FastAPI()
@@ -961,6 +970,131 @@ def generate_request_population(seed: int, n: int = 100) -> List[Dict]:
 	]
 
 
+def get_experiments_path() -> Path:
+	return Path(__file__).resolve().parents[1] / "experiments"
+
+
+def load_json_file(filename: str) -> Dict:
+	path = get_experiments_path() / filename
+	if not path.exists():
+		raise RuntimeError(f"Persisted experiment artifact not found: {filename}")
+	return json.loads(path.read_text(encoding="utf-8"))
+
+
+@lru_cache(maxsize=1)
+def load_dashboard_artifacts() -> Dict:
+	"""Load the audited experiment artifacts without regenerating simulation data."""
+	seeds = (20260821, 20260822, 20260823, 20260824, 20260825)
+	seed_results = {seed: load_json_file(f"seed_{seed}.json") for seed in seeds}
+	requests = {}
+	for seed, result in seed_results.items():
+		for request_id, record in result["results_by_request_id"].items():
+			requests[(seed, int(request_id))] = record
+	return {
+		"summary": load_json_file("five_seed_summary.json"),
+		"analysis": load_json_file("experiment_analysis_v1.json"),
+		"seed_results": seed_results,
+		"requests": requests,
+	}
+
+
+@lru_cache(maxsize=1)
+def load_buyer_request_records() -> Dict:
+	"""Index the locked persisted buyer requests for explorer display only."""
+	path = Path(__file__).resolve().parents[1] / "data" / "mirror_buyer_requests_5seeds_v1.csv"
+	indexed = {}
+	df = pd.read_csv(path)
+	# A blank incoming ETA means no incoming shipment. Convert that missing CSV
+	# cell to JSON null before it can become pandas' non-JSON NaN sentinel.
+	for row in df.astype(object).where(pd.notna(df), None).to_dict(orient="records"):
+		row["eligible_substitute_skus"] = json.loads(row["eligible_substitute_skus"])
+		indexed[(int(row["experiment_seed"]), int(row["request_id"]))] = row
+	return indexed
+
+
+def payment_configuration() -> Dict:
+	key_id = os.getenv("RAZORPAY_KEY_ID")
+	key_secret = os.getenv("RAZORPAY_KEY_SECRET")
+	return {"configured": bool(key_id and key_secret), "key_id": key_id, "key_secret": key_secret}
+
+
+PAYMENT_ORDERS: Dict[str, Dict] = {}
+
+
+def selected_candidate_for_request(seed: int, request_id: int) -> Dict:
+	try:
+		record = load_dashboard_artifacts()["requests"][(seed, request_id)]
+	except KeyError as error:
+		raise HTTPException(status_code=404, detail="Persisted MIRROR request not found") from error
+	if record["decision"] != "NEGOTIATE" or not record.get("best_candidate"):
+		raise HTTPException(status_code=409, detail="Only a selected MIRROR negotiation candidate is payable")
+	best = record["best_candidate"]
+	if not best.get("passes_risk_gate"):
+		raise HTTPException(status_code=409, detail="Selected candidate must pass the persisted risk gate")
+	matching = [
+		candidate for candidate in record["candidates"]
+		if candidate["sku_id"] == best["sku_id"]
+		and candidate["action_type"] == best["action_type"]
+		and candidate["quantity"] == best["quantity"]
+		and candidate["delivery_window_days"] == best["delivery_window_days"]
+		and candidate["candidate_price"] == best["candidate_price"]
+	]
+	if len(matching) != 1:
+		raise HTTPException(status_code=409, detail="Persisted selected candidate cannot be validated")
+	return best
+
+
+def candidate_amount_paise(candidate: Dict) -> int:
+	amount = Decimal(str(candidate["candidate_price"])) * Decimal(str(candidate["quantity"]))
+	return int((amount * Decimal("100")).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def razorpay_create_order(amount: int, receipt: str, configuration: Dict) -> Dict:
+	"""Call Razorpay Orders API with server-only Basic authentication."""
+	payload = json.dumps({"amount": amount, "currency": "INR", "receipt": receipt}).encode("utf-8")
+	credentials = f"{configuration['key_id']}:{configuration['key_secret']}".encode("utf-8")
+	request = Request(
+		"https://api.razorpay.com/v1/orders",
+		data=payload,
+		headers={
+			"Content-Type": "application/json",
+			"Authorization": "Basic " + base64.b64encode(credentials).decode("ascii"),
+		},
+		method="POST",
+	)
+	try:
+		with urlopen(request, timeout=15) as response:
+			return json.loads(response.read().decode("utf-8"))
+	except (HTTPError, URLError, TimeoutError) as error:
+		raise HTTPException(status_code=502, detail="Razorpay order creation failed") from error
+
+
+def deterministic_explanation(record: Dict) -> List[str]:
+	"""Explain a persisted decision strictly from its stored fields."""
+	if record["decision"] == "REJECT":
+		return [
+			"No candidate satisfied the persisted decision rule.",
+			"MIRROR did not create a payment transaction.",
+		]
+	if record["decision"] == "ACCEPT":
+		return [
+			"The baseline transaction remained the selected safe option.",
+			"No risk-gate-passing candidate exceeded the strict improvement threshold.",
+		]
+	candidate = record["best_candidate"]
+	lines = []
+	if not record["baseline_feasible"]:
+		lines.append("The original request was not baseline-feasible.")
+	else:
+		lines.append("A MIRROR alternative exceeded the baseline improvement threshold.")
+	lines.extend([
+		f"MIRROR selected a {candidate['action_type'].lower()} alternative.",
+		"The selected candidate passed the persisted P05 downside gate.",
+		"It was the highest-scoring surviving option.",
+	])
+	return lines
+
+
 @APP.on_event("startup")
 def startup_load_data() -> None:
 	locked_data = load_locked_data()
@@ -1031,6 +1165,181 @@ def get_buyer_request_quantity(sku_id: str):
 def get_buyer_request():
 	target_sku = select_target_sku(APP.state.catalog_skus, APP.state.buyer_target_rng)
 	return build_buyer_request(target_sku["sku_id"])
+
+
+@APP.get("/dashboard/summary")
+def dashboard_summary():
+	analysis = load_dashboard_artifacts()["analysis"]["global_experiment_summary"]
+	return {
+		"data_label": "MIRROR EXPERIMENT DATA",
+		"requests": analysis["total_requests"],
+		"accept": analysis["accept"],
+		"negotiate": analysis["negotiate"],
+		"reject": analysis["reject"],
+		"candidates": analysis["total_candidates_evaluated"],
+		"risk_gate_rejections": analysis["risk_gate_rejections"],
+		"rescue_count": analysis["constraint_conflict_rescue_count"],
+		"selected_expected_contribution": analysis["total_selected_expected_net_contribution"],
+		"selected_p05": analysis["total_selected_p05_net_contribution"],
+		"average_contribution": analysis["average_selected_expected_net_contribution_per_request"],
+		"negotiation_rate": analysis["negotiate_pct"],
+		"rescue_rate": analysis["constraint_conflict_rescue_rate"],
+		"risk_rejection_rate": analysis["risk_gate_rejection_rate"],
+		"razorpay_test_mode": "CONFIGURED" if payment_configuration()["configured"] else "DISABLED-NO-CREDENTIALS",
+	}
+
+
+@APP.get("/dashboard/levers")
+def dashboard_levers():
+	return load_dashboard_artifacts()["analysis"]["negotiation_levers"]
+
+
+@APP.get("/dashboard/seeds")
+def dashboard_seeds():
+	return load_dashboard_artifacts()["analysis"]["five_seed_stability"]
+
+
+@APP.get("/dashboard/cases")
+def dashboard_cases():
+	return load_dashboard_artifacts()["analysis"]["case_studies"]
+
+
+@APP.get("/dashboard/analysis")
+def dashboard_analysis():
+	return load_dashboard_artifacts()["analysis"]
+
+
+@APP.get("/dashboard/product-metrics")
+def dashboard_product_metrics():
+	"""Read-only presentation metrics derived from persisted experiment records."""
+	artifacts = load_dashboard_artifacts()
+	seed_metrics = []
+	price_candidates = price_pass = 0
+	for seed, result in artifacts["seed_results"].items():
+		baseline = selected = 0.0
+		for record in result["results_by_request_id"].values():
+			reference = record.get("reference")
+			if record["reference_type"] == "BASELINE":
+				baseline += reference["expected_net_contribution"]
+			chosen = record.get("best_candidate") if record["decision"] == "NEGOTIATE" else reference if record["decision"] == "ACCEPT" else None
+			if chosen:
+				selected += chosen["expected_net_contribution"]
+			for candidate in record["candidates"]:
+				if candidate["action_type"] == "PRICE":
+					price_candidates += 1
+					price_pass += candidate["passes_risk_gate"]
+		seed_metrics.append((selected - baseline) / baseline)
+	return {
+		"mean_seed_uplift": sum(seed_metrics) / len(seed_metrics),
+		"pooled_uplift": (sum(record["total_selected_expected_net_contribution"] for record in artifacts["summary"]["per_seed"].values()) - sum(
+			item["total_baseline_expected_net_contribution"] for item in [artifacts["analysis"]["decision_engine_value"]]
+		)) / artifacts["analysis"]["decision_engine_value"]["total_baseline_expected_net_contribution"],
+		"positive_seed_count": sum(value > 0 for value in seed_metrics),
+		"at_least_five_pct_seed_count": sum(value >= .05 for value in seed_metrics),
+		"baseline_reference_count": artifacts["analysis"]["decision_engine_value"]["baseline_reference_request_count"],
+		"baseline_reference_improvement": artifacts["analysis"]["decision_engine_value"]["aggregate_absolute_improvement"],
+		"baseline_reference_improvement_pct": artifacts["analysis"]["decision_engine_value"]["aggregate_percentage_improvement"],
+		"negotiable_candidate_count": sum(len(record["candidates"]) for record in artifacts["requests"].values()),
+		"baseline_reference_count_for_risk": sum(1 for record in artifacts["requests"].values() if record.get("reference", {}).get("paths") == 10000),
+		"price_candidates": price_candidates, "price_passed_risk_gate": price_pass,
+	}
+
+
+@APP.get("/dashboard/requests")
+def dashboard_requests():
+	"""Compact persisted request index for the virtualized frontend explorer."""
+	rows = []
+	for (seed, request_id), record in load_dashboard_artifacts()["requests"].items():
+		selected = record.get("best_candidate") if record["decision"] == "NEGOTIATE" else record.get("reference")
+		rows.append({
+			"seed": seed, "request_id": request_id, "classification": record["classification"],
+			"decision": record["decision"],
+			"lever": selected.get("action_type") if record["decision"] == "NEGOTIATE" else None,
+			"expected_net_contribution": selected.get("expected_net_contribution", 0) if selected else 0,
+		})
+	return sorted(rows, key=lambda row: (row["seed"], row["request_id"]))
+
+
+@APP.get("/dashboard/request/{seed}/{request_id}")
+def dashboard_request(seed: int, request_id: int):
+	artifacts = load_dashboard_artifacts()
+	try:
+		decision = artifacts["requests"][(seed, request_id)]
+		buyer_request = load_buyer_request_records()[(seed, request_id)]
+	except KeyError as error:
+		raise HTTPException(status_code=404, detail="Persisted MIRROR request not found") from error
+	return {
+		"data_label": "MIRROR EXPERIMENT DATA",
+		"buyer_request": buyer_request,
+		"decision": decision,
+		"explanation": deterministic_explanation(decision),
+		"payment": {
+			"payable": decision["decision"] == "NEGOTIATE",
+			"razorpay_test_mode": "CONFIGURED" if payment_configuration()["configured"] else "DISABLED-NO-CREDENTIALS",
+		},
+	}
+
+
+@APP.post("/payments/create-order")
+def create_payment_order(payload: Dict):
+	configuration = payment_configuration()
+	if not configuration["configured"]:
+		raise HTTPException(status_code=503, detail="Razorpay Test Mode Not Configured")
+	try:
+		seed, request_id = int(payload["seed"]), int(payload["request_id"])
+	except (KeyError, TypeError, ValueError) as error:
+		raise HTTPException(status_code=422, detail="seed and request_id are required") from error
+	candidate = selected_candidate_for_request(seed, request_id)
+	amount = candidate_amount_paise(candidate)
+	receipt = f"mirror-{seed}-{request_id}"
+	order = razorpay_create_order(amount, receipt, configuration)
+	if not order.get("id") or order.get("amount") != amount or order.get("currency") != "INR":
+		raise HTTPException(status_code=502, detail="Razorpay returned an invalid order response")
+	if order["id"] in PAYMENT_ORDERS:
+		raise HTTPException(status_code=409, detail="Duplicate Razorpay order received")
+	PAYMENT_ORDERS[order["id"]] = {
+		"seed": seed, "request_id": request_id, "amount": amount,
+		"candidate": candidate, "verified": False, "payment_id": None,
+	}
+	return {"order_id": order["id"], "amount": amount, "currency": "INR", "key_id": configuration["key_id"]}
+
+
+@APP.post("/payments/verify")
+def verify_payment(payload: Dict):
+	configuration = payment_configuration()
+	if not configuration["configured"]:
+		raise HTTPException(status_code=503, detail="Razorpay Test Mode Not Configured")
+	try:
+		order_id = payload["razorpay_order_id"]
+		payment_id = payload["razorpay_payment_id"]
+		signature = payload["razorpay_signature"]
+	except KeyError as error:
+		raise HTTPException(status_code=422, detail="Razorpay payment verification fields are required") from error
+	order = PAYMENT_ORDERS.get(order_id)
+	if order is None:
+		raise HTTPException(status_code=404, detail="Unknown local Razorpay order")
+	if order["verified"] or order["payment_id"] is not None:
+		raise HTTPException(status_code=409, detail="Payment fulfillment was already processed")
+	body = f"{order_id}|{payment_id}".encode("utf-8")
+	expected = hmac.new(configuration["key_secret"].encode("utf-8"), body, hashlib.sha256).hexdigest()
+	if not hmac.compare_digest(expected, signature):
+		raise HTTPException(status_code=400, detail="Invalid Razorpay payment signature")
+	order["verified"] = True
+	order["payment_id"] = payment_id
+	return {"verified": True, "order_id": order_id, "payment_id": payment_id}
+
+
+STATIC_PATH = Path(__file__).resolve().parents[1] / "frontened"
+if STATIC_PATH.exists():
+	APP.mount("/ui", StaticFiles(directory=STATIC_PATH), name="merchant-ui")
+
+
+@APP.get("/", include_in_schema=False)
+def merchant_dashboard():
+	index = STATIC_PATH / "index.html"
+	if not index.exists():
+		raise HTTPException(status_code=404, detail="Merchant dashboard is not installed")
+	return FileResponse(index)
 
 
 app = APP

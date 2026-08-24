@@ -1,0 +1,749 @@
+{
+  "action_type_effects": {
+    "BASELINE": {
+      "count": 390,
+      "mean_expected_fulfilled_units": 17.174578974358976,
+      "mean_expected_net_change_vs_baseline_reference_where_available": 0.0,
+      "mean_expected_net_contribution": 150851.3392076923,
+      "mean_expected_returned_units": 1.0730792307692307,
+      "mean_p05_net_contribution": 141176.0153846154,
+      "mean_return_probability": 0.5743976923076923,
+      "mean_sla_success_probability": 0.9754276923076923,
+      "reference_comparison_count": 390
+    },
+    "PRICE": {
+      "count": 0,
+      "mean_expected_fulfilled_units": null,
+      "mean_expected_net_change_vs_baseline_reference_where_available": null,
+      "mean_expected_net_contribution": null,
+      "mean_expected_returned_units": null,
+      "mean_p05_net_contribution": null,
+      "mean_return_probability": null,
+      "mean_sla_success_probability": null,
+      "reference_comparison_count": 0
+    },
+    "QUANTITY": {
+      "count": 15,
+      "mean_expected_fulfilled_units": 19.030613333333335,
+      "mean_expected_net_change_vs_baseline_reference_where_available": null,
+      "mean_expected_net_contribution": 173754.05296,
+      "mean_expected_returned_units": 1.52486,
+      "mean_p05_net_contribution": 120288.66666666667,
+      "mean_return_probability": 0.6674333333333333,
+      "mean_sla_success_probability": 0.75456,
+      "reference_comparison_count": 0
+    },
+    "SUBSTITUTION": {
+      "count": 39,
+      "mean_expected_fulfilled_units": 14.5824,
+      "mean_expected_net_change_vs_baseline_reference_where_available": 31679.774352152483,
+      "mean_expected_net_contribution": 169658.38981069063,
+      "mean_expected_returned_units": 1.0098589743589743,
+      "mean_p05_net_contribution": 151703.15909292773,
+      "mean_return_probability": 0.5328820512820512,
+      "mean_sla_success_probability": 0.9301769230769231,
+      "reference_comparison_count": 20
+    },
+    "TIMING": {
+      "count": 1,
+      "mean_expected_fulfilled_units": 36.0,
+      "mean_expected_net_change_vs_baseline_reference_where_available": null,
+      "mean_expected_net_contribution": 219530.331,
+      "mean_expected_returned_units": 2.163,
+      "mean_p05_net_contribution": 214245.0,
+      "mean_return_probability": 0.8905,
+      "mean_sla_success_probability": 1.0,
+      "reference_comparison_count": 0
+    }
+  },
+  "artifact": "experiment_analysis_v1",
+  "case_studies": {
+    "selection_criteria": {
+      "constraint_conflict_rescues": "descending selected expected net contribution",
+      "opportunity_negotiations": "descending expected contribution improvement versus baseline reference",
+      "risk_gate_rejections": "descending candidate expected contribution minus risk threshold"
+    },
+    "strongest_constraint_conflict_rescues": [
+      {
+        "baseline_feasible": false,
+        "candidate": {
+          "action_type": "SUBSTITUTION",
+          "candidate_price": 54610.0,
+          "delivery_window_days": 7,
+          "expected_fulfilled_units": 44.9984,
+          "expected_net_contribution": 539071.396,
+          "expected_returned_units": 2.7074,
+          "p05_net_contribution": 527040.0,
+          "passes_risk_gate": true,
+          "paths": 10000,
+          "quantity": 45,
+          "return_probability": 0.9412,
+          "score": 539071.396,
+          "sku_id": "LAP-034",
+          "sla_success_probability": 0.9994
+        },
+        "classification": "CONSTRAINT_CONFLICT",
+        "decision": "NEGOTIATE",
+        "reference_expected_net_contribution": 0,
+        "reference_p05_net_contribution": 0,
+        "reference_type": "NO_DEAL",
+        "request_fields_unavailable_in_persisted_raw_json": [
+          "requested_quantity",
+          "deadline_days",
+          "baseline_availability",
+          "conflict_reason"
+        ],
+        "request_id": 91,
+        "seed": 20260822,
+        "selected_expected_net_contribution": 539071.396,
+        "selected_p05_net_contribution": 527040.0,
+        "target_sku_id": "LAP-024"
+      },
+      {
+        "baseline_feasible": false,
+        "candidate": {
+          "action_type": "SUBSTITUTION",
+          "candidate_price": 50870.0,
+          "delivery_window_days": 3,
+          "expected_fulfilled_units": 40.2177,
+          "expected_net_contribution": 432433.7199,
+          "expected_returned_units": 3.8471,
+          "p05_net_contribution": 359775.0,
+          "passes_risk_gate": true,
+          "paths": 10000,
+          "quantity": 42.0,
+          "return_probability": 0.9586,
+          "score": 432433.7199,
+          "sku_id": "LAP-019",
+          "sla_success_probability": 0.5795
+        },
+        "classification": "CONSTRAINT_CONFLICT",
+        "decision": "NEGOTIATE",
+        "reference_expected_net_contribution": 0,
+        "reference_p05_net_contribution": 0,
+        "reference_type": "NO_DEAL",
+        "request_fields_unavailable_in_persisted_raw_json": [
+          "requested_quantity",
+          "deadline_days",
+          "baseline_availability",
+          "conflict_reason"
+        ],
+        "request_id": 11,
+        "seed": 20260825,
+        "selected_expected_net_contribution": 432433.7199,
+        "selected_p05_net_contribution": 359775.0,
+        "target_sku_id": "LAP-009"
+      }
+    ],
+    "strongest_opportunity_negotiations": [
+      {
+        "baseline_feasible": true,
+        "candidate": {
+          "action_type": "SUBSTITUTION",
+          "candidate_price": 53541.69128439315,
+          "delivery_window_days": 5,
+          "expected_fulfilled_units": 23.0,
+          "expected_net_contribution": 251425.72256111406,
+          "expected_returned_units": 1.3784,
+          "p05_net_contribution": 246010.37738508862,
+          "passes_risk_gate": true,
+          "paths": 10000,
+          "quantity": 23,
+          "return_probability": 0.7578,
+          "score": 251425.72256111406,
+          "sku_id": "LAP-034",
+          "sla_success_probability": 1.0
+        },
+        "classification": "OPPORTUNITY",
+        "decision": "NEGOTIATE",
+        "reference_expected_net_contribution": 171591.732,
+        "reference_p05_net_contribution": 141180.0,
+        "reference_type": "BASELINE",
+        "request_fields_unavailable_in_persisted_raw_json": [
+          "requested_quantity",
+          "deadline_days",
+          "baseline_availability",
+          "conflict_reason"
+        ],
+        "request_id": 40,
+        "seed": 20260823,
+        "selected_expected_net_contribution": 251425.72256111406,
+        "selected_p05_net_contribution": 246010.37738508862,
+        "target_sku_id": "LAP-024"
+      },
+      {
+        "baseline_feasible": true,
+        "candidate": {
+          "action_type": "SUBSTITUTION",
+          "candidate_price": 60870.0,
+          "delivery_window_days": 5,
+          "expected_fulfilled_units": 23.1908,
+          "expected_net_contribution": 310903.098,
+          "expected_returned_units": 2.2053,
+          "p05_net_contribution": 226320.0,
+          "passes_risk_gate": true,
+          "paths": 10000,
+          "quantity": 25.0,
+          "return_probability": 0.8619,
+          "score": 298439.098,
+          "sku_id": "LAP-040",
+          "sla_success_probability": 0.5662
+        },
+        "classification": "OPPORTUNITY",
+        "decision": "NEGOTIATE",
+        "reference_expected_net_contribution": 243070.9736,
+        "reference_p05_net_contribution": 238784.0,
+        "reference_type": "BASELINE",
+        "request_fields_unavailable_in_persisted_raw_json": [
+          "requested_quantity",
+          "deadline_days",
+          "baseline_availability",
+          "conflict_reason"
+        ],
+        "request_id": 27,
+        "seed": 20260825,
+        "selected_expected_net_contribution": 310903.098,
+        "selected_p05_net_contribution": 226320.0,
+        "target_sku_id": "LAP-015"
+      }
+    ],
+    "strongest_risk_gate_rejections": [
+      {
+        "baseline_feasible": true,
+        "candidate": {
+          "action_type": "SUBSTITUTION",
+          "candidate_price": 66430.0,
+          "delivery_window_days": 5,
+          "expected_fulfilled_units": 21.3669,
+          "expected_net_contribution": 297628.1091,
+          "expected_returned_units": 1.8943,
+          "p05_net_contribution": 206064.0,
+          "passes_risk_gate": false,
+          "paths": 10000,
+          "quantity": 23.0,
+          "return_probability": 0.8251,
+          "score": null,
+          "sku_id": "LAP-037",
+          "sla_success_probability": 0.6304
+        },
+        "classification": "OPPORTUNITY",
+        "decision": "ACCEPT",
+        "expected_contribution_advantage_over_selected_or_reference": 4684.211100000015,
+        "expected_contribution_minus_risk_threshold": 39853.70910000001,
+        "reference_expected_net_contribution": 292943.898,
+        "reference_p05_net_contribution": 286416.0,
+        "reference_type": "BASELINE",
+        "request_fields_unavailable_in_persisted_raw_json": [
+          "requested_quantity",
+          "deadline_days",
+          "baseline_availability",
+          "conflict_reason"
+        ],
+        "request_id": 73,
+        "seed": 20260825,
+        "selected_expected_net_contribution": 292943.898,
+        "selected_p05_net_contribution": 286416.0,
+        "target_sku_id": "LAP-027"
+      }
+    ]
+  },
+  "constraint_conflict_analysis": {
+    "average_rescued_expected_net_contribution": 178465.05619639673,
+    "average_rescued_p05_net_contribution": 144490.6258599053,
+    "not_rescued": 10,
+    "rejected_conflict_count": 10,
+    "request_count": 45,
+    "rescue_action_distribution": {
+      "QUANTITY": 15,
+      "SUBSTITUTION": 19,
+      "TIMING": 1
+    },
+    "rescue_rate": 0.7777777777777778,
+    "rescued": 35,
+    "strongest_five_real_rescues": [
+      {
+        "baseline_feasible": false,
+        "candidate": {
+          "action_type": "SUBSTITUTION",
+          "candidate_price": 54610.0,
+          "delivery_window_days": 7,
+          "expected_fulfilled_units": 44.9984,
+          "expected_net_contribution": 539071.396,
+          "expected_returned_units": 2.7074,
+          "p05_net_contribution": 527040.0,
+          "passes_risk_gate": true,
+          "paths": 10000,
+          "quantity": 45,
+          "return_probability": 0.9412,
+          "score": 539071.396,
+          "sku_id": "LAP-034",
+          "sla_success_probability": 0.9994
+        },
+        "classification": "CONSTRAINT_CONFLICT",
+        "decision": "NEGOTIATE",
+        "reference_expected_net_contribution": 0,
+        "reference_p05_net_contribution": 0,
+        "reference_type": "NO_DEAL",
+        "request_fields_unavailable_in_persisted_raw_json": [
+          "requested_quantity",
+          "deadline_days",
+          "baseline_availability",
+          "conflict_reason"
+        ],
+        "request_id": 91,
+        "seed": 20260822,
+        "selected_expected_net_contribution": 539071.396,
+        "selected_p05_net_contribution": 527040.0,
+        "target_sku_id": "LAP-024"
+      },
+      {
+        "baseline_feasible": false,
+        "candidate": {
+          "action_type": "SUBSTITUTION",
+          "candidate_price": 50870.0,
+          "delivery_window_days": 3,
+          "expected_fulfilled_units": 40.2177,
+          "expected_net_contribution": 432433.7199,
+          "expected_returned_units": 3.8471,
+          "p05_net_contribution": 359775.0,
+          "passes_risk_gate": true,
+          "paths": 10000,
+          "quantity": 42.0,
+          "return_probability": 0.9586,
+          "score": 432433.7199,
+          "sku_id": "LAP-019",
+          "sla_success_probability": 0.5795
+        },
+        "classification": "CONSTRAINT_CONFLICT",
+        "decision": "NEGOTIATE",
+        "reference_expected_net_contribution": 0,
+        "reference_p05_net_contribution": 0,
+        "reference_type": "NO_DEAL",
+        "request_fields_unavailable_in_persisted_raw_json": [
+          "requested_quantity",
+          "deadline_days",
+          "baseline_availability",
+          "conflict_reason"
+        ],
+        "request_id": 11,
+        "seed": 20260825,
+        "selected_expected_net_contribution": 432433.7199,
+        "selected_p05_net_contribution": 359775.0,
+        "target_sku_id": "LAP-009"
+      },
+      {
+        "baseline_feasible": false,
+        "candidate": {
+          "action_type": "SUBSTITUTION",
+          "candidate_price": 60870.0,
+          "delivery_window_days": 3,
+          "expected_fulfilled_units": 30.6923,
+          "expected_net_contribution": 411707.13,
+          "expected_returned_units": 2.8615,
+          "p05_net_contribution": 340860.0,
+          "passes_risk_gate": true,
+          "paths": 10000,
+          "quantity": 32.0,
+          "return_probability": 0.9097,
+          "score": 411707.13,
+          "sku_id": "LAP-040",
+          "sla_success_probability": 0.607
+        },
+        "classification": "CONSTRAINT_CONFLICT",
+        "decision": "NEGOTIATE",
+        "reference_expected_net_contribution": 0,
+        "reference_p05_net_contribution": 0,
+        "reference_type": "NO_DEAL",
+        "request_fields_unavailable_in_persisted_raw_json": [
+          "requested_quantity",
+          "deadline_days",
+          "baseline_availability",
+          "conflict_reason"
+        ],
+        "request_id": 50,
+        "seed": 20260822,
+        "selected_expected_net_contribution": 411707.13,
+        "selected_p05_net_contribution": 340860.0,
+        "target_sku_id": "LAP-005"
+      },
+      {
+        "baseline_feasible": false,
+        "candidate": {
+          "action_type": "QUANTITY",
+          "candidate_price": 49440,
+          "delivery_window_days": 10,
+          "expected_fulfilled_units": 27.3737,
+          "expected_net_contribution": 323383.148,
+          "expected_returned_units": 2.1594,
+          "p05_net_contribution": 219010.0,
+          "passes_risk_gate": true,
+          "paths": 10000,
+          "quantity": 29,
+          "return_probability": 0.865,
+          "score": 323383.148,
+          "sku_id": "LAP-010",
+          "sla_success_probability": 0.7422
+        },
+        "classification": "CONSTRAINT_CONFLICT",
+        "decision": "NEGOTIATE",
+        "reference_expected_net_contribution": 0,
+        "reference_p05_net_contribution": 0,
+        "reference_type": "NO_DEAL",
+        "request_fields_unavailable_in_persisted_raw_json": [
+          "requested_quantity",
+          "deadline_days",
+          "baseline_availability",
+          "conflict_reason"
+        ],
+        "request_id": 82,
+        "seed": 20260822,
+        "selected_expected_net_contribution": 323383.148,
+        "selected_p05_net_contribution": 219010.0,
+        "target_sku_id": "LAP-010"
+      },
+      {
+        "baseline_feasible": false,
+        "candidate": {
+          "action_type": "SUBSTITUTION",
+          "candidate_price": 57140.0,
+          "delivery_window_days": 5,
+          "expected_fulfilled_units": 34.6053,
+          "expected_net_contribution": 293890.6314,
+          "expected_returned_units": 2.3596,
+          "p05_net_contribution": 261834.0,
+          "passes_risk_gate": true,
+          "paths": 10000,
+          "quantity": 35,
+          "return_probability": 0.8967,
+          "score": 293890.6314,
+          "sku_id": "LAP-039",
+          "sla_success_probability": 0.899
+        },
+        "classification": "CONSTRAINT_CONFLICT",
+        "decision": "NEGOTIATE",
+        "reference_expected_net_contribution": 0,
+        "reference_p05_net_contribution": 0,
+        "reference_type": "NO_DEAL",
+        "request_fields_unavailable_in_persisted_raw_json": [
+          "requested_quantity",
+          "deadline_days",
+          "baseline_availability",
+          "conflict_reason"
+        ],
+        "request_id": 53,
+        "seed": 20260824,
+        "selected_expected_net_contribution": 293890.6314,
+        "selected_p05_net_contribution": 261834.0,
+        "target_sku_id": "LAP-019"
+      }
+    ]
+  },
+  "data_limitations": {
+    "handling": "Unavailable fields are represented as unavailable rather than reconstructed from non-experiment inputs.",
+    "request_level_fields_not_persisted": [
+      "requested_quantity",
+      "deadline_days",
+      "baseline_availability",
+      "conflict_reason",
+      "price_only_substitution_only_both_opportunity_flags"
+    ]
+  },
+  "decision_engine_value": {
+    "aggregate_absolute_improvement": 633595.4870430455,
+    "aggregate_percentage_improvement": 0.010320040908751339,
+    "baseline_reference_request_count": 410,
+    "constraint_conflict": {
+      "average_expected_contribution_of_rescues": 178465.05619639673,
+      "average_p05_of_rescues": 144490.6258599053,
+      "expected_contribution_generated_by_rescues": 6246276.966873885,
+      "request_count": 45,
+      "rescued_count": 35
+    },
+    "mean_baseline_expected_net_contribution": 149743.09308560975,
+    "mean_selected_expected_net_contribution": 151288.4479320562,
+    "total_baseline_expected_net_contribution": 61394668.1651,
+    "total_selected_expected_net_contribution": 62028263.652143046
+  },
+  "five_seed_stability": {
+    "across_seed": {
+      "accept_pct": {
+        "max": 0.79,
+        "mean": 0.78,
+        "min": 0.77,
+        "sensitivity_flag": "not assigned; no locked high-sensitivity threshold",
+        "std": 0.008944271909999166
+      },
+      "constraint_conflict_rescue_pct": {
+        "max": 0.8888888888888888,
+        "mean": 0.7827777777777778,
+        "min": 0.6,
+        "sensitivity_flag": "not assigned; no locked high-sensitivity threshold",
+        "std": 0.10444444444444444
+      },
+      "evaluated_candidate_count": {
+        "max": 984,
+        "mean": 821.6,
+        "min": 696,
+        "sensitivity_flag": "not assigned; no locked high-sensitivity threshold",
+        "std": 99.81302520212479
+      },
+      "mean_selected_expected_net_contribution": {
+        "max": 164916.4453402091,
+        "mean": 153446.67755039225,
+        "min": 142046.6132409934,
+        "sensitivity_flag": "not assigned; no locked high-sensitivity threshold",
+        "std": 8551.854285250552
+      },
+      "mean_selected_p05_net_contribution": {
+        "max": 153957.8306283,
+        "mean": 141581.54428893546,
+        "min": 131208.852933882,
+        "sensitivity_flag": "not assigned; no locked high-sensitivity threshold",
+        "std": 8051.938949565149
+      },
+      "negotiate_pct": {
+        "max": 0.12,
+        "mean": 0.11,
+        "min": 0.1,
+        "sensitivity_flag": "not assigned; no locked high-sensitivity threshold",
+        "std": 0.006324555320336755
+      },
+      "reject_pct": {
+        "max": 0.12,
+        "mean": 0.11,
+        "min": 0.1,
+        "sensitivity_flag": "not assigned; no locked high-sensitivity threshold",
+        "std": 0.006324555320336755
+      },
+      "risk_gate_rejection_pct": {
+        "max": 0.7078507078507078,
+        "mean": 0.666147031285191,
+        "min": 0.5967479674796748,
+        "sensitivity_flag": "not assigned; no locked high-sensitivity threshold",
+        "std": 0.03948865234090792
+      }
+    },
+    "per_seed": {
+      "20260821": {
+        "accept_pct": 0.79,
+        "constraint_conflict_rescue_pct": 0.6,
+        "evaluated_candidate_count": 860,
+        "mean_selected_expected_net_contribution": 147017.83477611106,
+        "mean_selected_p05_net_contribution": 138252.22365277173,
+        "negotiate_pct": 0.1,
+        "reject_pct": 0.11,
+        "risk_gate_rejection_pct": 0.7078507078507078
+      },
+      "20260822": {
+        "accept_pct": 0.77,
+        "constraint_conflict_rescue_pct": 0.8,
+        "evaluated_candidate_count": 984,
+        "mean_selected_expected_net_contribution": 161241.69265113637,
+        "mean_selected_p05_net_contribution": 147315.9090909091,
+        "negotiate_pct": 0.11,
+        "reject_pct": 0.12,
+        "risk_gate_rejection_pct": 0.6792035398230089
+      },
+      "20260823": {
+        "accept_pct": 0.78,
+        "constraint_conflict_rescue_pct": 0.75,
+        "evaluated_candidate_count": 743,
+        "mean_selected_expected_net_contribution": 164916.4453402091,
+        "mean_selected_p05_net_contribution": 153957.8306283,
+        "negotiate_pct": 0.11,
+        "reject_pct": 0.11,
+        "risk_gate_rejection_pct": 0.6515151515151515
+      },
+      "20260824": {
+        "accept_pct": 0.77,
+        "constraint_conflict_rescue_pct": 0.8888888888888888,
+        "evaluated_candidate_count": 696,
+        "mean_selected_expected_net_contribution": 142046.6132409934,
+        "mean_selected_p05_net_contribution": 131208.852933882,
+        "negotiate_pct": 0.12,
+        "reject_pct": 0.11,
+        "risk_gate_rejection_pct": 0.5967479674796748
+      },
+      "20260825": {
+        "accept_pct": 0.79,
+        "constraint_conflict_rescue_pct": 0.875,
+        "evaluated_candidate_count": 825,
+        "mean_selected_expected_net_contribution": 152010.8017435114,
+        "mean_selected_p05_net_contribution": 137172.9051388144,
+        "negotiate_pct": 0.11,
+        "reject_pct": 0.1,
+        "risk_gate_rejection_pct": 0.6954177897574124
+      }
+    }
+  },
+  "global_experiment_summary": {
+    "accept": 390,
+    "accept_pct": 0.78,
+    "average_candidates_per_request": 8.216,
+    "average_selected_expected_net_contribution_per_request": 136549.08123803386,
+    "average_selected_p05_net_contribution_per_request": 125987.28840924837,
+    "baseline_accept_count": 83,
+    "constraint_conflict_count": 45,
+    "constraint_conflict_rescue_count": 35,
+    "constraint_conflict_rescue_rate": 0.7777777777777778,
+    "hard_reject_count": 45,
+    "hard_reject_rate": 0.09,
+    "negotiate": 55,
+    "negotiate_pct": 0.11,
+    "opportunity_count": 327,
+    "reject": 55,
+    "reject_pct": 0.11,
+    "risk_gate_rejection_rate": 0.6698215251487291,
+    "risk_gate_rejections": 2477,
+    "total_candidates_evaluated": 4108,
+    "total_requests": 500,
+    "total_selected_expected_net_contribution": 68274540.61901693,
+    "total_selected_p05_net_contribution": 62993644.20462418
+  },
+  "hard_reject_analysis": {
+    "candidate_count": 0,
+    "candidate_generation_skipped_for_all": true,
+    "count": 45,
+    "rate": 0.09,
+    "representative_examples": [
+      {
+        "candidate_count": 0,
+        "classification": "HARD_REJECT",
+        "decision": "REJECT",
+        "request_id": 6,
+        "seed": 20260821,
+        "target_sku_id": "LAP-045"
+      },
+      {
+        "candidate_count": 0,
+        "classification": "HARD_REJECT",
+        "decision": "REJECT",
+        "request_id": 11,
+        "seed": 20260821,
+        "target_sku_id": "LAP-022"
+      },
+      {
+        "candidate_count": 0,
+        "classification": "HARD_REJECT",
+        "decision": "REJECT",
+        "request_id": 14,
+        "seed": 20260821,
+        "target_sku_id": "LAP-005"
+      }
+    ],
+    "why_not_rescued": "Raw JSON records HARD_REJECT and zero candidates; detailed constraint cause was not persisted."
+  },
+  "negotiation_levers": {
+    "by_action": {
+      "PRICE": {
+        "count": 0,
+        "pct_all_negotiate": 0.0,
+        "pct_constraint_conflict_rescue": 0.0,
+        "pct_opportunity_negotiate": 0.0
+      },
+      "QUANTITY": {
+        "count": 15,
+        "pct_all_negotiate": 0.2727272727272727,
+        "pct_constraint_conflict_rescue": 0.42857142857142855,
+        "pct_opportunity_negotiate": 0.0
+      },
+      "SUBSTITUTION": {
+        "count": 39,
+        "pct_all_negotiate": 0.7090909090909091,
+        "pct_constraint_conflict_rescue": 0.5428571428571428,
+        "pct_opportunity_negotiate": 1.0
+      },
+      "TIMING": {
+        "count": 1,
+        "pct_all_negotiate": 0.01818181818181818,
+        "pct_constraint_conflict_rescue": 0.02857142857142857,
+        "pct_opportunity_negotiate": 0.0
+      }
+    },
+    "selected_action_distribution": {
+      "BASELINE": 390,
+      "QUANTITY": 15,
+      "SUBSTITUTION": 39,
+      "TIMING": 1
+    },
+    "single_lever_combinations": {
+      "none": 55
+    },
+    "total_negotiate_requests": 55
+  },
+  "opportunity_class_analysis": {
+    "accept": 307,
+    "mean_expected_contribution_improvement_vs_baseline": 1937.6008778074913,
+    "mean_p05_change_vs_baseline": 1811.7929649158893,
+    "negotiate": 20,
+    "negotiation_rate": 0.06116207951070336,
+    "price_substitution_composition": "unavailable: flags were not persisted in raw experiment JSON",
+    "reject": 0,
+    "request_count": 327,
+    "selected_lever_distribution": {
+      "BASELINE": 307,
+      "SUBSTITUTION": 20
+    }
+  },
+  "risk_gate_value": {
+    "attractive_by_expected_contribution_alone_count": 1,
+    "mean_expected_net_contribution": 90587.06068329213,
+    "mean_p05_net_contribution": 78779.06110525732,
+    "rejected_candidate_count": 2477,
+    "rejected_candidate_pct_of_evaluated_negotiable_candidates": 0.6698215251487291,
+    "selection_criterion": "descending candidate expected_net_contribution minus request risk_threshold; deterministic tie-break by seed, request_id, action_type, sku_id, candidate_price",
+    "strongest_five_prevented_risky_transaction_examples": [
+      {
+        "baseline_feasible": true,
+        "candidate": {
+          "action_type": "SUBSTITUTION",
+          "candidate_price": 66430.0,
+          "delivery_window_days": 5,
+          "expected_fulfilled_units": 21.3669,
+          "expected_net_contribution": 297628.1091,
+          "expected_returned_units": 1.8943,
+          "p05_net_contribution": 206064.0,
+          "passes_risk_gate": false,
+          "paths": 10000,
+          "quantity": 23.0,
+          "return_probability": 0.8251,
+          "score": null,
+          "sku_id": "LAP-037",
+          "sla_success_probability": 0.6304
+        },
+        "classification": "OPPORTUNITY",
+        "decision": "ACCEPT",
+        "expected_contribution_advantage_over_selected_or_reference": 4684.211100000015,
+        "expected_contribution_minus_risk_threshold": 39853.70910000001,
+        "reference_expected_net_contribution": 292943.898,
+        "reference_p05_net_contribution": 286416.0,
+        "reference_type": "BASELINE",
+        "request_fields_unavailable_in_persisted_raw_json": [
+          "requested_quantity",
+          "deadline_days",
+          "baseline_availability",
+          "conflict_reason"
+        ],
+        "request_id": 73,
+        "seed": 20260825,
+        "selected_expected_net_contribution": 292943.898,
+        "selected_p05_net_contribution": 286416.0,
+        "target_sku_id": "LAP-027"
+      }
+    ]
+  },
+  "scope": "Derived solely from persisted experiment JSON files; no experiment rerun.",
+  "source_files": [
+    "seed_20260821.json",
+    "seed_20260822.json",
+    "seed_20260823.json",
+    "seed_20260824.json",
+    "seed_20260825.json",
+    "five_seed_summary.json"
+  ],
+  "terminology": {
+    "expected_contribution": "Monte Carlo expected net contribution; not realized profit.",
+    "no_deal": "Constraint-Conflict reference is zero and is not treated as a baseline transaction.",
+    "p05": "Empirical fifth percentile of path-level net contribution; not CVaR."
+  }
+}
