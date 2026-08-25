@@ -1,0 +1,270 @@
+{
+  "model_version": "sla-logreg-v1-seed-20260825",
+  "train_rows": 80000,
+  "test_rows": 20000,
+  "test_skus": [
+    "LAP-041",
+    "LAP-042",
+    "LAP-043",
+    "LAP-044",
+    "LAP-045",
+    "LAP-046",
+    "LAP-047",
+    "LAP-048",
+    "LAP-049",
+    "LAP-050"
+  ],
+  "thresholds": [
+    {
+      "threshold": 0.2,
+      "precision": 0.513048128342246,
+      "recall": 1.0,
+      "f1": 0.678164981974977,
+      "false_negative": 0,
+      "false_positive": 4553
+    },
+    {
+      "threshold": 0.25,
+      "precision": 0.5575581395348838,
+      "recall": 0.9995830727538044,
+      "f1": 0.7158319026647758,
+      "false_negative": 2,
+      "false_positive": 3805
+    },
+    {
+      "threshold": 0.3,
+      "precision": 0.6146153846153846,
+      "recall": 0.9993746091307066,
+      "f1": 0.7611336032388663,
+      "false_negative": 3,
+      "false_positive": 3006
+    },
+    {
+      "threshold": 0.35,
+      "precision": 0.6564383561643835,
+      "recall": 0.9989576818845112,
+      "f1": 0.7922625444325038,
+      "false_negative": 5,
+      "false_positive": 2508
+    },
+    {
+      "threshold": 0.4,
+      "precision": 0.7074074074074074,
+      "recall": 0.9954138002918491,
+      "f1": 0.8270546462284576,
+      "false_negative": 22,
+      "false_positive": 1975
+    },
+    {
+      "threshold": 0.45,
+      "precision": 0.7759349593495934,
+      "recall": 0.9947884094225558,
+      "f1": 0.8718370329770714,
+      "false_negative": 25,
+      "false_positive": 1378
+    },
+    {
+      "threshold": 0.5,
+      "precision": 0.793,
+      "recall": 0.991869918699187,
+      "f1": 0.8813559322033898,
+      "false_negative": 39,
+      "false_positive": 1242
+    },
+    {
+      "threshold": 0.55,
+      "precision": 0.8493693693693694,
+      "recall": 0.9826975192828852,
+      "f1": 0.9111819851164588,
+      "false_negative": 83,
+      "false_positive": 836
+    },
+    {
+      "threshold": 0.6,
+      "precision": 0.9056310679611651,
+      "recall": 0.9722743381279967,
+      "f1": 0.9377701819644114,
+      "false_negative": 133,
+      "false_positive": 486
+    }
+  ],
+  "cost_sensitivity": {
+    "10": {
+      "false_negative_cost_multiplier": 10,
+      "best_threshold": 0.45,
+      "best_cost": 1628,
+      "candidates": [
+        {
+          "threshold": 0.2,
+          "cost": 4553
+        },
+        {
+          "threshold": 0.25,
+          "cost": 3825
+        },
+        {
+          "threshold": 0.3,
+          "cost": 3036
+        },
+        {
+          "threshold": 0.35,
+          "cost": 2558
+        },
+        {
+          "threshold": 0.4,
+          "cost": 2195
+        },
+        {
+          "threshold": 0.45,
+          "cost": 1628
+        },
+        {
+          "threshold": 0.5,
+          "cost": 1632
+        },
+        {
+          "threshold": 0.55,
+          "cost": 1666
+        },
+        {
+          "threshold": 0.6,
+          "cost": 1816
+        }
+      ]
+    },
+    "25": {
+      "false_negative_cost_multiplier": 25,
+      "best_threshold": 0.45,
+      "best_cost": 2003,
+      "candidates": [
+        {
+          "threshold": 0.2,
+          "cost": 4553
+        },
+        {
+          "threshold": 0.25,
+          "cost": 3855
+        },
+        {
+          "threshold": 0.3,
+          "cost": 3081
+        },
+        {
+          "threshold": 0.35,
+          "cost": 2633
+        },
+        {
+          "threshold": 0.4,
+          "cost": 2525
+        },
+        {
+          "threshold": 0.45,
+          "cost": 2003
+        },
+        {
+          "threshold": 0.5,
+          "cost": 2217
+        },
+        {
+          "threshold": 0.55,
+          "cost": 2911
+        },
+        {
+          "threshold": 0.6,
+          "cost": 3811
+        }
+      ]
+    },
+    "50": {
+      "false_negative_cost_multiplier": 50,
+      "best_threshold": 0.45,
+      "best_cost": 2628,
+      "candidates": [
+        {
+          "threshold": 0.2,
+          "cost": 4553
+        },
+        {
+          "threshold": 0.25,
+          "cost": 3905
+        },
+        {
+          "threshold": 0.3,
+          "cost": 3156
+        },
+        {
+          "threshold": 0.35,
+          "cost": 2758
+        },
+        {
+          "threshold": 0.4,
+          "cost": 3075
+        },
+        {
+          "threshold": 0.45,
+          "cost": 2628
+        },
+        {
+          "threshold": 0.5,
+          "cost": 3192
+        },
+        {
+          "threshold": 0.55,
+          "cost": 4986
+        },
+        {
+          "threshold": 0.6,
+          "cost": 7136
+        }
+      ]
+    },
+    "100": {
+      "false_negative_cost_multiplier": 100,
+      "best_threshold": 0.35,
+      "best_cost": 3008,
+      "candidates": [
+        {
+          "threshold": 0.2,
+          "cost": 4553
+        },
+        {
+          "threshold": 0.25,
+          "cost": 4005
+        },
+        {
+          "threshold": 0.3,
+          "cost": 3306
+        },
+        {
+          "threshold": 0.35,
+          "cost": 3008
+        },
+        {
+          "threshold": 0.4,
+          "cost": 4175
+        },
+        {
+          "threshold": 0.45,
+          "cost": 3878
+        },
+        {
+          "threshold": 0.5,
+          "cost": 5142
+        },
+        {
+          "threshold": 0.55,
+          "cost": 9136
+        },
+        {
+          "threshold": 0.6,
+          "cost": 13786
+        }
+      ]
+    }
+  },
+  "interpretation": {
+    "0.45": "Preferred under 10x, 25x and 50x false-negative cost scenarios.",
+    "0.35": "Preferred under the extreme 100x false-negative cost scenario.",
+    "caveat": "Cost multipliers are sensitivity assumptions, not measured production business costs."
+  }
+}
