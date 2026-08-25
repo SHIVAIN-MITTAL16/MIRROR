@@ -4,21 +4,29 @@ import { replayPipeline } from '/ui/decision-pipeline.js';
 const intro = document.querySelector('#cinematic-intro');
 const introVideo = document.querySelector('#intro-video');
 const skipIntro = document.querySelector('#skip-intro');
+const replayIntro = document.querySelector('#replay-intro');
+const introWatchedKey = 'mirror_intro_watched';
 let introClosed = false;
 
 function completeIntro() {
   if (introClosed) return;
   introClosed = true;
+  window.localStorage.setItem(introWatchedKey, 'true');
   document.body.classList.add('intro-complete');
   window.setTimeout(() => intro?.remove(), 1100);
 }
+
+replayIntro?.addEventListener('click', () => {
+  window.localStorage.removeItem(introWatchedKey);
+  window.location.reload();
+});
 
 if (intro && introVideo) {
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   skipIntro?.addEventListener('click', completeIntro);
   introVideo.addEventListener('ended', completeIntro, { once: true });
   introVideo.addEventListener('error', completeIntro, { once: true });
-  if (reducedMotion) {
+  if (window.localStorage.getItem(introWatchedKey) === 'true' || reducedMotion) {
     completeIntro();
   } else {
     introVideo.play().catch(completeIntro);
@@ -27,7 +35,7 @@ if (intro && introVideo) {
 
 const freshOverrides = document.createElement('link');
 freshOverrides.rel = 'stylesheet';
-freshOverrides.href = '/ui/core-overrides.css?qa=final';
+freshOverrides.href = '/ui/core-overrides.css?qa=metrics';
 document.head.append(freshOverrides);
 
 const $ = selector => document.querySelector(selector);
@@ -123,7 +131,7 @@ function renderAggregate(analysis, levers, rows, metrics) {
   const global = analysis.global_experiment_summary;
   const seeds = Object.keys(analysis.five_seed_stability.per_seed);
   $('#mean-uplift').textContent = pct(metrics.mean_seed_uplift);
-  $('#seed-network').innerHTML = seeds.map((seed, index) => { const seedResult = analysis.five_seed_stability.per_seed[seed]; return '<span class="seed-node"><b>' + seed.slice(-2) + '</b><small>A ' + pct1(seedResult.accept_pct) + ' · N ' + pct1(seedResult.negotiate_pct) + ' · R ' + pct1(seedResult.reject_pct) + '</small></span>' + (index < seeds.length - 1 ? '<i></i>' : ''); }).join('');
+  $('#seed-network').innerHTML = seeds.map((seed, index) => { const seedResult = analysis.five_seed_stability.per_seed[seed]; return '<span class="seed-node"><b>' + seed.slice(-2) + '</b><small>A ' + pct1(seedResult.accept_pct) + '</small><small>P05 ' + money(seedResult.mean_selected_p05_net_contribution) + '</small></span>' + (index < seeds.length - 1 ? '<i></i>' : ''); }).join('');
   $('#seed-proof').textContent = metrics.positive_seed_count + ' / ' + seeds.length + ' seeds positive · ' + metrics.at_least_five_pct_seed_count + ' / ' + seeds.length + ' seeds achieved at least 5% uplift.';
   $('#pooled-uplift').textContent = pct(metrics.pooled_uplift);
   $('#feasible-value').textContent = money(metrics.baseline_reference_improvement) + ' · ' + pct(metrics.baseline_reference_improvement_pct);
