@@ -6,13 +6,21 @@
 
 MIRROR is a decision engine for commerce transactions under uncertainty. Instead of treating a buyer request as a simple accept/reject problem, MIRROR evaluates whether the transaction can be **recovered, negotiated, or safely declined** while protecting downside risk.
 
-The project combines a persisted five-seed experiment, a data-driven decision pipeline, an evidence-first explorer, and a cinematic product interface.
+**Live demo:** https://mirror-1-mhqr.onrender.com/
 
----
+![MIRROR Dashboard](data/dashboard.png)
 
-## The idea
+## Why MIRROR exists
 
 A commerce request can fail for many reasons: inventory constraints, timing, price pressure, or unacceptable downside. MIRROR searches the space of legitimate alternatives and keeps only candidates that survive the persisted risk gate.
+
+The system is built around a simple principle:
+
+> **Story can be expressive. Evidence must remain real.**
+
+Visual states and displayed metrics are driven by persisted experiment records and their actual fields rather than fabricated AI narratives.
+
+## Decision model
 
 ```text
 BUYER REQUEST
@@ -49,48 +57,21 @@ BUYER REQUEST
      RAZORPAY BOUNDARY
 ```
 
-The important distinction is that the interface **does not invent an AI narrative**. Visual states and displayed metrics are driven by persisted experiment records and their actual fields.
+### Buyer request
 
----
+The request layer captures the commercial constraints that MIRROR must reason over before deciding whether the baseline transaction is safe.
 
-## What is in the experience
-
-### Cinematic opening
-
-A fullscreen MIRROR opening sequence establishes the product before the dashboard appears. The supplied local video is served from the frontend and hands off into the live dashboard when it ends; the intro can also be skipped.
+![Buyer Request](data/Buyer-request.png)
 
 ### Decision pipeline
 
-The interface visualizes the journey from baseline pressure through candidate search, uncertainty, survival, and the final decision. Candidate persistence, risk-gate outcomes, and the selected candidate come from the stored experiment records.
+The interface makes the decision path inspectable: baseline pressure, candidate search, uncertainty, risk-gate survival, and the final persisted outcome.
 
-### Evidence, not dashboard noise
+![Decision Pipeline](data/decision-pipeline.png)
 
-The later sections deliberately become more restrained:
+## Evidence, not dashboard noise
 
-- **Value Created** — five-seed value evidence
-- **Constraint Recovery** — recovery/rescue evidence
-- **Risk Protection** — P05 gate evidence
-- **Negotiation Levers** — actual selected lever counts
-- **Request Explorer** — the persisted 500-request decision ledger
-- **Execution Boundary** — the handoff from MIRROR intelligence to Razorpay
-
-### Decision states
-
-MIRROR supports three persisted outcomes:
-
-| Decision | Meaning |
-| --- | --- |
-| **ACCEPT** | The baseline remains the safe selected transaction. |
-| **NEGOTIATE** | A risk-gate-passing alternative beats the baseline under the decision rule. |
-| **REJECT** | No candidate satisfies the persisted decision rule. |
-
----
-
-## Data integrity principle
-
-**The visuals are allowed to be expressive. The evidence is not.**
-
-The dashboard reads audited experiment artifacts rather than regenerating presentation numbers. The backend indexes persisted request/decision records and exposes read-only dashboard endpoints for the frontend.
+MIRROR combines a persisted five-seed experiment, a data-driven decision pipeline, an evidence-first explorer, and a product interface built around those artifacts.
 
 The runtime model includes:
 
@@ -105,9 +86,25 @@ The runtime model includes:
 - negotiation-lever aggregates
 - request-level decision records
 
-No fabricated progress percentages, fake AI reasoning, or simulated payment-success states are part of the product narrative.
+### Value Created
 
----
+Five-seed evidence is used to show the value created by the decision engine rather than inventing presentation metrics.
+
+![Value Created](data/value-created.png)
+
+### Request Explorer
+
+The explorer exposes the persisted request/decision ledger so individual decisions can be inspected rather than hidden behind aggregate dashboard numbers.
+
+![Request Explorer](data/request-explorer.png)
+
+## Decision states
+
+| Decision | Meaning |
+| --- | --- |
+| **ACCEPT** | The baseline remains the safe selected transaction. |
+| **NEGOTIATE** | A risk-gate-passing alternative beats the baseline under the decision rule. |
+| **REJECT** | No candidate satisfies the persisted decision rule. |
 
 ## Architecture
 
@@ -147,8 +144,6 @@ The frontend lives under `frontened/` and includes the cinematic intro, core MIR
 
 Razorpay order creation is server-side and only available when test credentials are configured. Selected negotiation candidates are validated against persisted records before an order can be created, and payment signatures are verified server-side.
 
----
-
 ## Project structure
 
 ```text
@@ -157,7 +152,11 @@ MIRROR/
 │   ├── main.py
 │   └── test_dashboard.py
 ├── data/
-│   └── persisted buyer-request data
+│   ├── Buyer-request.png
+│   ├── dashboard.png
+│   ├── decision-pipeline.png
+│   ├── request-explorer.png
+│   └── value-created.png
 ├── experiments/
 │   ├── persisted seed results
 │   ├── five-seed summary
@@ -179,8 +178,6 @@ MIRROR/
 └── README.md
 ```
 
----
-
 ## Run locally
 
 ### 1. Create / activate the virtual environment
@@ -192,7 +189,11 @@ python -m venv venv
 
 ### 2. Install dependencies
 
-Use the project's dependency setup if present in your environment.
+If `requirements.txt` is present:
+
+```powershell
+pip install -r requirements.txt
+```
 
 ### 3. Start MIRROR
 
@@ -207,8 +208,6 @@ http://127.0.0.1:8002/
 ```
 
 The backend also exposes `/health` for a basic service check.
-
----
 
 ## Payment configuration
 
@@ -225,9 +224,7 @@ Never commit credentials to the repository.
 
 When credentials are absent, the interface should remain truthful and show the disabled/no-credentials state rather than pretending a payment succeeded.
 
----
-
-## Validation philosophy
+## Validation
 
 The project has been checked across desktop and mobile compositions, including:
 
@@ -247,19 +244,11 @@ Key regression checks include:
 - persisted-data bindings
 - Razorpay disabled-state behavior
 
----
-
 ## Visual direction
 
 MIRROR is intentionally **not** styled as a conventional AI dashboard.
 
 The visual language is built around a precision instrument: restrained indigo/blue atmosphere, dimensional geometry, sparse symbols, asymmetric composition, and state-driven motion. The interface should feel closer to an engineered commerce instrument than a generic SaaS control panel.
-
-The governing rule is simple:
-
-> **Story can be expressive. Evidence must remain real.**
-
----
 
 ## Status
 
@@ -273,8 +262,6 @@ Current milestones:
 - Cinematic opening sequence
 - Responsive hero refinement
 - Razorpay test-mode execution boundary
-
----
 
 ## Repository
 
