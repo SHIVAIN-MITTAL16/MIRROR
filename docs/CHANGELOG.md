@@ -1,5 +1,16 @@
 # MIRROR Changelog
 
+## 2026-08-26
+
+### Demo evidence integration
+
+- Added a clearly labelled experimental ML SLA-risk evidence section to the dashboard.
+- Added a persisted frontend evidence snapshot sourced from the completed risk-model benchmarks rather than invented UI values.
+- Added two replayable demo cases: a risk-caught negotiation and a safer-alternative substitution-to-price case.
+- Added held-out precision/recall/F1, calibration, risk-separation and end-to-end impact figures to the demo surface.
+- Added explicit honesty guardrails in the UI: synthetic evaluation, experimental threshold, and no claim of profit improvement.
+- Added responsive styling for the new evidence surface without changing the deterministic decision engine.
+
 ## 2026-08-25
 
 ### Real AI foundation
