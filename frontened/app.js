@@ -5,19 +5,16 @@ const intro = document.querySelector('#cinematic-intro');
 const introVideo = document.querySelector('#intro-video');
 const skipIntro = document.querySelector('#skip-intro');
 const replayIntro = document.querySelector('#replay-intro');
-const introWatchedKey = 'mirror_intro_watched';
 let introClosed = false;
 
 function completeIntro() {
   if (introClosed) return;
   introClosed = true;
-  window.localStorage.setItem(introWatchedKey, 'true');
   document.body.classList.add('intro-complete');
   window.setTimeout(() => intro?.remove(), 1100);
 }
 
 replayIntro?.addEventListener('click', () => {
-  window.localStorage.removeItem(introWatchedKey);
   window.location.reload();
 });
 
@@ -26,10 +23,22 @@ if (intro && introVideo) {
   skipIntro?.addEventListener('click', completeIntro);
   introVideo.addEventListener('ended', completeIntro, { once: true });
   introVideo.addEventListener('error', completeIntro, { once: true });
-  if (window.localStorage.getItem(introWatchedKey) === 'true' || reducedMotion) {
+
+  if (reducedMotion) {
     completeIntro();
   } else {
-    introVideo.play().catch(completeIntro);
+    const startIntro = () => {
+      introVideo.play().catch(() => {
+        // Keep the intro visible if autoplay is temporarily blocked.
+        // The user can still use the explicit Skip intro control.
+      });
+    };
+
+    if (introVideo.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      startIntro();
+    } else {
+      introVideo.addEventListener('loadedmetadata', startIntro, { once: true });
+    }
   }
 }
 
