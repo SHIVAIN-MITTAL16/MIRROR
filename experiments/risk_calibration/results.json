@@ -1,0 +1,110 @@
+{
+  "model_version": "sla-logreg-v1-seed-20260825",
+  "train_rows": 80000,
+  "test_rows": 20000,
+  "test_skus": [
+    "LAP-041",
+    "LAP-042",
+    "LAP-043",
+    "LAP-044",
+    "LAP-045",
+    "LAP-046",
+    "LAP-047",
+    "LAP-048",
+    "LAP-049",
+    "LAP-050"
+  ],
+  "brier_score": 0.05187243407692846,
+  "expected_calibration_error": 0.1266350644271014,
+  "calibration_intercept_slope": {
+    "intercept": -0.0034297644703905165,
+    "slope": 0.002174033554187314
+  },
+  "bins": [
+    {
+      "lower": 0.0,
+      "upper": 0.1,
+      "count": 7700,
+      "predicted_mean": 0.04224080044123364,
+      "observed_rate": 0.0,
+      "absolute_gap": 0.04224080044123364
+    },
+    {
+      "lower": 0.1,
+      "upper": 0.2,
+      "count": 2950,
+      "predicted_mean": 0.14738062417062017,
+      "observed_rate": 0.0,
+      "absolute_gap": 0.14738062417062017
+    },
+    {
+      "lower": 0.2,
+      "upper": 0.30000000000000004,
+      "count": 1550,
+      "predicted_mean": 0.25141613822464826,
+      "observed_rate": 0.001935483870967742,
+      "absolute_gap": 0.24948065435368053
+    },
+    {
+      "lower": 0.30000000000000004,
+      "upper": 0.4,
+      "count": 1050,
+      "predicted_mean": 0.34945479984309646,
+      "observed_rate": 0.018095238095238095,
+      "absolute_gap": 0.33135956174785836
+    },
+    {
+      "lower": 0.4,
+      "upper": 0.5,
+      "count": 750,
+      "predicted_mean": 0.43800525877456237,
+      "observed_rate": 0.02266666666666667,
+      "absolute_gap": 0.4153385921078957
+    },
+    {
+      "lower": 0.5,
+      "upper": 0.6000000000000001,
+      "count": 850,
+      "predicted_mean": 0.5445528871474574,
+      "observed_rate": 0.11058823529411765,
+      "absolute_gap": 0.43396465185333977
+    },
+    {
+      "lower": 0.6000000000000001,
+      "upper": 0.7000000000000001,
+      "count": 600,
+      "predicted_mean": 0.6414247639683737,
+      "observed_rate": 0.4766666666666667,
+      "absolute_gap": 0.16475809730170698
+    },
+    {
+      "lower": 0.7000000000000001,
+      "upper": 0.8,
+      "count": 950,
+      "predicted_mean": 0.7582290275830342,
+      "observed_rate": 0.8189473684210526,
+      "absolute_gap": 0.060718340838018414
+    },
+    {
+      "lower": 0.8,
+      "upper": 0.9,
+      "count": 850,
+      "predicted_mean": 0.8451682685411459,
+      "observed_rate": 1.0,
+      "absolute_gap": 0.1548317314588541
+    },
+    {
+      "lower": 0.9,
+      "upper": 1.0,
+      "count": 2750,
+      "predicted_mean": 0.974715062660249,
+      "observed_rate": 1.0,
+      "absolute_gap": 0.025284937339751012
+    }
+  ],
+  "interpretation": {
+    "ideal_intercept": 0.0,
+    "ideal_slope": 1.0,
+    "note": "Calibration is evaluated on SKU-held-out synthetic data. It is not evidence of calibration on real merchant traffic."
+  }
+}
