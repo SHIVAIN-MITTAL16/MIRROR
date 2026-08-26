@@ -1,6 +1,6 @@
 # MIRROR — Current State Ledger
 
-**Last updated:** 25 August 2026  
+**Last updated:** 26 August 2026  
 **Branch:** `mirror-visual-redesign`
 
 This file is intentionally blunt. It records what is implemented, what is only designed, and what still needs evidence.
@@ -20,12 +20,16 @@ This file is intentionally blunt. It records what is implemented, what is only d
 - First learned SLA-risk model implemented in `backend/risk_model.py`.
 - AI-facing risk API implemented in `backend/ai_app.py`.
 - Risk-model unit tests added in `backend/test_risk_model.py`.
+- SKU-held-out risk-model benchmark executed and persisted.
+- Threshold sensitivity and scenario-cost analysis executed and persisted.
+- Experimental ML evidence panel added to the dashboard using persisted benchmark evidence.
+- Two replayable ML demonstration cases recorded in the dashboard evidence snapshot.
 
-## Implemented but benchmark evidence still pending
+## Implemented but still requiring final validation
 
-- SKU-held-out ML evaluation metrics need to be executed and recorded.
-- Runtime AI endpoints need deployment validation.
-- Model threshold needs scenario-level cost analysis.
+- Runtime AI endpoints need deployment validation on the deployed environment.
+- Final browser validation of the ML evidence panel at 1440×900, 1280×720, 768×720 and 390×844.
+- Final console/API validation after the visual integration.
 
 ## Designed, not yet implemented
 
@@ -52,3 +56,7 @@ A feature is **DONE** only when:
 4. documentation matches the implementation.
 
 Until then it stays explicitly marked as pending.
+
+## ML boundary
+
+The learned SLA-risk model is an experimental second safety layer. Its training/evaluation data are synthetic MIRROR scenarios with SKU-held-out evaluation. It must not be described as production-validated or as evidence of increased profit. The deterministic P05 decision engine remains the existing transaction-selection authority.
