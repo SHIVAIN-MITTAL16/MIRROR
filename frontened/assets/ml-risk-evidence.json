@@ -1,0 +1,86 @@
+{
+  "data_label": "PERSISTED ML EXPERIMENT EVIDENCE",
+  "experimental": true,
+  "model_version": "sla-logreg-v1-seed-20260825",
+  "threshold": 0.35,
+  "held_out": {
+    "train_rows": 80000,
+    "test_rows": 20000,
+    "test_skus": 10
+  },
+  "classification_at_threshold": {
+    "precision": 0.6564383561643835,
+    "recall": 0.9989576818845112,
+    "f1": 0.7922625444325038,
+    "false_negative": 5,
+    "false_positive": 2508
+  },
+  "calibration": {
+    "brier_score": 0.05187243407692846,
+    "expected_calibration_error": 0.1266350644271014
+  },
+  "p05_approved_validation": {
+    "pass_n": 478,
+    "pass_mean_actual_sla_miss": 0.039464435146443516,
+    "fail_n": 11,
+    "fail_mean_actual_sla_miss": 0.3232272727272727,
+    "fail_vs_pass_mean_risk_ratio": 8.190343318683013
+  },
+  "end_to_end": {
+    "baseline": {
+      "accept": 390,
+      "negotiate": 55,
+      "reject": 55,
+      "selected": 445,
+      "expected_contribution": 68274540.61901693,
+      "p05": 62993644.20462418
+    },
+    "ml_gated": {
+      "accept": 391,
+      "negotiate": 53,
+      "reject": 56,
+      "selected": 444,
+      "expected_contribution": 67702153.67411692,
+      "p05": 62623454.20462418
+    },
+    "decision_changes": 2,
+    "decision_change_rate": 0.004,
+    "expected_contribution_change_pct": -0.008383607413692002,
+    "p05_change_pct": -0.005876624613072082,
+    "additional_ml_rejections": 36,
+    "additional_ml_rejection_rate": 0.0294840295
+  },
+  "demo_cases": [
+    {
+      "id": "risk-caught",
+      "seed": 20260821,
+      "request_id": 22,
+      "baseline_decision": "NEGOTIATE",
+      "ml_decision": "REJECT",
+      "actual_sla_miss": 0.3278,
+      "ml_risk": 0.485933,
+      "expected_net": 145168.0725,
+      "p05": 110550.0
+    },
+    {
+      "id": "safer-alternative",
+      "seed": 20260825,
+      "request_id": 4,
+      "old_action": "SUBSTITUTION",
+      "old_expected_net": 591787.9484,
+      "old_p05": 497904.0,
+      "old_actual_sla_miss": 0.3839,
+      "new_action": "PRICE",
+      "new_expected_net": 531360.4001,
+      "new_p05": 525463.0,
+      "new_ml_risk": 0.1636428715,
+      "new_actual_sla_miss": 0.0051
+    }
+  ],
+  "honesty": [
+    "This is an experimental safety layer, not production ML performance.",
+    "The model is trained and evaluated on synthetic MIRROR scenarios with SKU-held-out evaluation.",
+    "The end-to-end comparison does not demonstrate a profit increase.",
+    "Threshold 0.35 is retained for this demo experiment and is not claimed to be production-optimal."
+  ]
+}
