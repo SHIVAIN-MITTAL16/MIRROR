@@ -14,7 +14,7 @@ if (liveSku) {
 }
 
 // Buyer-first policy for fresh live requests:
-// when the exact requested SKU is already affordable and fulfilment-feasible,
+// when the exact requested SKU is already affordable AND fulfilment-feasible,
 // substitution must not be used merely because it produces more merchant
 // contribution. Recovery substitutions remain enabled when the baseline is
 // actually constrained.
@@ -31,12 +31,17 @@ window.fetch = async (input, init = {}) => {
     const payload = JSON.parse(init.body || '{}');
     if (payload.substitution_tolerance === 1 && payload.sku_id && payload.requested_quantity > 0) {
       const skuResponse = await nativeFetch('/skus/' + encodeURIComponent(payload.sku_id));
-      if (skuResponse.ok) {
+      const availabilityResponse = await nativeFetch(
+        '/availability/' + encodeURIComponent(payload.sku_id) + '?days=' + encodeURIComponent(payload.deadline_days),
+      );
+      if (skuResponse.ok && availabilityResponse.ok) {
         const sku = await skuResponse.json();
+        const availability = await availabilityResponse.json();
         const tolerance = priceTolerance[payload.price_flexibility] ?? 0.05;
         const buyerCeiling = Number(payload.budget) * (1 + tolerance);
         const baselineTotal = Number(sku.current_price) * Number(payload.requested_quantity);
-        if (baselineTotal <= buyerCeiling + 1e-9) {
+        const inventoryFeasible = Number(payload.requested_quantity) <= Number(availability.available);
+        if (inventoryFeasible && baselineTotal <= buyerCeiling + 1e-9) {
           payload.substitution_tolerance = 0;
           init = { ...init, body: JSON.stringify(payload) };
         }
