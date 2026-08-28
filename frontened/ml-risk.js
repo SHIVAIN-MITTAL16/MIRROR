@@ -23,6 +23,7 @@ function caseCard(item) {
     row('Seed / request', item.seed + ' / ' + item.request_id) +
     row('Old SLA miss', pct(item.old_actual_sla_miss), 'ml-risk__risk') +
     row('Old expected net', money(item.old_expected_net)) +
+    row('New expected net', money(item.new_expected_net), 'ml-risk__risk') +
     row('New predicted risk', pct(item.new_ml_risk), 'ml-risk__safe') +
     row('New observed SLA miss', pct(item.new_actual_sla_miss), 'ml-risk__safe') +
     row('New P05', money(item.new_p05)) +
@@ -49,7 +50,7 @@ async function mountMLRisk() {
         metric('ECE', pct(evidence.calibration.expected_calibration_error)) +
         metric('Risk separation', evidence.p05_approved_validation.fail_vs_pass_mean_risk_ratio.toFixed(2) + '×') +
       '</div></article>' +
-      '<article class="ml-risk__card"><span class="ml-risk__label">END-TO-END IMPACT</span><div class="ml-risk__value">' + (evidence.end_to_end.decision_change_rate * 100).toFixed(1) + '%</div><p class="ml-risk__sub">Only ' + evidence.end_to_end.decision_changes + ' of 500 decisions changed in the experimental comparison.</p><div class="ml-risk__metrics">' +
+      '<article class="ml-risk__card"><span class="ml-risk__label">END-TO-END TRADEOFF</span><div class="ml-risk__value">' + (evidence.end_to_end.decision_change_rate * 100).toFixed(1) + '%</div><p class="ml-risk__sub">Only ' + evidence.end_to_end.decision_changes + ' of 500 decisions changed in the experimental comparison.</p><div class="ml-risk__metrics">' +
         metric('Expected contribution', pct(evidence.end_to_end.expected_contribution_change_pct)) +
         metric('P05 change', pct(evidence.end_to_end.p05_change_pct)) +
         metric('Extra ML rejects', evidence.end_to_end.additional_ml_rejections) +
