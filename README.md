@@ -6,7 +6,7 @@
 
 MIRROR is a deterministic commerce decision engine for transactions under uncertainty. It evaluates whether a buyer request should be **accepted, recovered through negotiation, or safely declined** while protecting downside risk.
 
-**Live demo:** https://mirror-rdqq.onrender.com/
+**Live demo:** https://mirror-rrdq.onrender.com/
 
 ## Core idea
 
@@ -219,7 +219,7 @@ MIRROR/
 
 ```powershell
 python -m venv venv
-.\venv\Scripts\Activate.ps1
+.\\venv\\Scripts\\Activate.ps1
 pip install -r requirements.txt
 ```
 
@@ -235,7 +235,7 @@ Then open:
 http://127.0.0.1:8002/
 ```
 
-The backend also exposes `/health`.
+The backend also exposes `/health` and `/ai/risk/health`.
 
 ## Render deployment
 
@@ -245,7 +245,9 @@ Render must start the **AI/live entrypoint**, not only `backend.main:app`:
 uvicorn backend.ai_app:app --host 0.0.0.0 --port $PORT
 ```
 
-The repository includes `render.yaml` with this configuration. For an existing Render service, change its Start Command in the service Settings and redeploy the branch. Render documents that an existing service's deploy commands can be modified from Settings.
+The repository includes `render.yaml` with this configuration and uses `/ai/risk/health` as the health-check contract so a deployment running only `backend.main:app` cannot be considered healthy by the Blueprint configuration.
+
+**Important for the current existing Render service:** if its Start Command is still configured manually as `uvicorn backend.main:app ...`, change that Start Command to the command above and redeploy. The repository file alone does not retroactively change a manually configured service unless the service is managed/synced through the Blueprint.
 
 ## Payment configuration
 
@@ -257,45 +259,3 @@ RAZORPAY_KEY_SECRET=...
 ```
 
 Never commit credentials.
-
-The Live Decision Room does **not** create a payment order. The persisted transaction flow remains the execution boundary.
-
-## Validation
-
-GitHub Actions runs the backend test suite on pushes to `mirror-visual-redesign`. The live-decision implementation passed the latest remote backend test job before the final documentation commit.
-
-The final deployed-browser smoke test is still required before recording. See `docs/FINAL_DEMO_QA.md`.
-
-## Important limitations
-
-1. The experiment data is **synthetic and locked**; it is not real merchant production traffic.
-2. The ML panel is **persisted experimental evidence**, not production-validated ML performance.
-3. The deterministic P05 engine remains the **transaction-selection authority**.
-4. The ML experiment currently does **not** demonstrate a profit increase.
-5. Live Decision Room requests are fresh evaluations against the locked state, not new benchmark evidence.
-6. Live Decision Room requests do not create live Razorpay payment orders.
-
-## Status
-
-**Active build — `mirror-visual-redesign`**
-
-Current milestones:
-
-- Persisted experiment-backed dashboard APIs
-- Deterministic candidate evaluation and P05 downside gate
-- Five-seed evidence-backed performance reporting
-- Data-driven decision pipeline
-- Constraint recovery analysis
-- Negotiation-lever analysis
-- Experimental ML SLA-risk safety layer
-- ML persisted demo cases
-- MIRROR vessel visual system
-- Cinematic opening sequence
-- Responsive dashboard refinement
-- **Live Decision Room for fresh requests**
-- Razorpay test-mode execution boundary
-- Final demo QA checkpoint
-
-## Repository
-
-MIRROR on GitHub: https://github.com/SHIVAIN-MITTAL16/MIRROR
