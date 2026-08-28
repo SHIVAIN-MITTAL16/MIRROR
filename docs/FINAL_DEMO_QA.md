@@ -12,6 +12,7 @@
 - New **Live Decision Room** for fresh, non-persisted buyer requests.
 - Razorpay execution boundary and its test-mode safety behavior.
 - Frontend wording against the persisted experiment evidence.
+- Current GitHub CI status and the deployed live-room failure shown in the browser.
 
 ## Corrections made
 
@@ -40,6 +41,33 @@ The hero no longer prints an empty action label when the selected result has no 
 A fresh request can now be entered through the UI and evaluated by the **same deterministic MIRROR engine** used by the persisted experiment. The live path performs candidate generation, Monte Carlo evaluation, P05 filtering and final selection, then returns the decision and a field-backed explanation.
 
 The live request is deliberately **not added to the 500 persisted experiment rows**. It is an interactive product surface, not a new benchmark claim.
+
+### 7. Deployment contract hardening
+
+The repository's Render Blueprint now starts `backend.ai_app:app` and uses `/ai/risk/health` as its health-check contract. This prevents a Blueprint-managed deployment running only `backend.main:app` from being treated as healthy even though the Live Decision Room route is missing.
+
+The README now points to the current live-demo hostname and explicitly documents the manual Start Command change required for an existing Render service that is not yet managed/synced through the Blueprint.
+
+## Current blocker found during final browser QA
+
+The deployed browser currently shows:
+
+```text
+Live decision failed.
+{"detail":"Not Found"}
+```
+
+This is **not a missing live endpoint in the repository**. The current `backend.ai_app:app` source defines `POST /ai/live-decision`, and the dedicated live-decision test suite passes in CI. The deployed service is therefore not exposing the AI/live ASGI app under its current runtime configuration. The most likely cause is the existing Render service still using a manually configured `backend.main:app` Start Command rather than `backend.ai_app:app`.
+
+**Do not record the demo while this 404 exists.**
+
+Required Render Start Command:
+
+```text
+uvicorn backend.ai_app:app --host 0.0.0.0 --port $PORT
+```
+
+After changing it, redeploy and rerun the live-room smoke test below. The browser must successfully return a fresh ACCEPT, NEGOTIATE or REJECT before recording.
 
 ## Locked evidence used for the demo
 
