@@ -245,7 +245,7 @@ Render must start the **AI/live entrypoint**, not only `backend.main:app`:
 uvicorn backend.ai_app:app --host 0.0.0.0 --port $PORT
 ```
 
-The repository includes `render.yaml` with this configuration. Render's service Settings can also be used to change an existing service's Start Command. After changing it, redeploy the branch. citeturn5search0turn5search1
+The repository includes `render.yaml` with this configuration. For an existing Render service, change its Start Command in the service Settings and redeploy the branch. Render documents that an existing service's deploy commands can be modified from Settings.
 
 ## Payment configuration
 
@@ -262,7 +262,7 @@ The Live Decision Room does **not** create a payment order. The persisted transa
 
 ## Validation
 
-GitHub Actions runs the backend test suite on pushes to `mirror-visual-redesign`. The latest live-decision implementation passed the remote backend test job. citeturn271file0turn270file0
+GitHub Actions runs the backend test suite on pushes to `mirror-visual-redesign`. The live-decision implementation passed the latest remote backend test job before the final documentation commit.
 
 The final deployed-browser smoke test is still required before recording. See `docs/FINAL_DEMO_QA.md`.
 
@@ -298,4 +298,4 @@ Current milestones:
 
 ## Repository
 
-urlMIRROR on GitHubhttps://github.com/SHIVAIN-MITTAL16/MIRROR
+MIRROR on GitHub: https://github.com/SHIVAIN-MITTAL16/MIRROR
