@@ -201,17 +201,23 @@ function setupLiveRoom(skus) {
 }
 
 async function boot() {
-  try {
-    const [dashboard, skus] = await Promise.all([get('/dashboard'), get('/skus')]);
-    state.rows = dashboard.requests || [];
-    state.defaultRow = state.rows[0];
-    setupLiveRoom(skus);
-    if (state.defaultRow) await select(state.defaultRow.seed, state.defaultRow.request_id);
-    renderAggregate(dashboard.analysis, dashboard.levers, state.rows, dashboard.metrics);
-    populateExplorer();
-  } catch (error) {
-    console.error(error);
-  }
+  const payload = await Promise.all([get('/dashboard/analysis'), get('/dashboard/levers'), get('/dashboard/requests'), get('/dashboard/product-metrics'), get('/skus')]);
+  const analysis = payload[0], levers = payload[1], rows = payload[2], metrics = payload[3], skus = payload[4];
+  state.rows = rows;
+  document.querySelector('.console-head span').textContent = rows.length + ' persisted request decisions';
+  [...new Set(rows.map(row => row.seed))].forEach(seed => $('#seed').add(new Option(seed, seed)));
+  [...new Set(rows.map(row => row.classification))].forEach(classification => $('#class-filter').add(new Option(classification, classification)));
+  state.defaultRow = rows.find(row => row.decision === 'NEGOTIATE' && row.lever === 'SUBSTITUTION') || rows[0];
+  renderAggregate(analysis, levers, rows, metrics);
+  populateExplorer();
+  setupLiveRoom(skus);
+  $('#load').onclick = () => select($('#seed').value, $('#request-id').value);
+  $('#analyze').onclick = () => { select(state.defaultRow.seed, state.defaultRow.request_id); $('#request').scrollIntoView(); };
+  $('#decision-filter').onchange = populateExplorer;
+  $('#class-filter').onchange = populateExplorer;
+  $('#clear-filters').onclick = () => { $('#decision-filter').value = 'ALL'; $('#class-filter').value = 'ALL'; populateExplorer(); };
+  renderIntelligenceCore($('#hero-core'), { decision:'REJECT', classification:'IDLE' }, 'hero');
+  select(state.defaultRow.seed, state.defaultRow.request_id);
 }
 
-boot();
+boot().catch(error => { document.body.innerHTML = '<pre>' + error.message + '</pre>'; });
