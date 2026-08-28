@@ -66,7 +66,7 @@ function setRequestObject(detail) {
 function setHeroState(detail) {
   const result = detail.decision;
   const candidate = result.best_candidate;
-  const label = result.decision + (candidate ? ' · ' + candidate.action_type : result.classification ? ' · ' + result.classification : '');
+  const label = result.decision + (candidate?.action_type ? ' · ' + candidate.action_type : result.classification ? ' · ' + result.classification : '');
   $('#hero-state').textContent = 'REQUEST ' + detail.buyer_request.request_id + ' · ' + label;
   $('#hero-state').className = 'hero-state ' + outcomeClass(result.decision);
   renderIntelligenceCore($('#hero-core'), detail, 'hero');
@@ -74,9 +74,15 @@ function setHeroState(detail) {
 
 function setRiskSelection(detail) {
   const result = detail.decision;
-  const candidate = result.best_candidate || result.reference;
-  $('#risk-selected-value').textContent = candidate ? money(candidate.p05_net_contribution) + ' / ' + money(candidate.expected_net_contribution) : '—';
-  $('#risk-selected-name').textContent = candidate ? candidate.sku_id : 'NO SAFE DEAL';
+  const selected = result.decision === 'NEGOTIATE'
+    ? result.best_candidate
+    : result.decision === 'ACCEPT'
+      ? result.reference
+      : null;
+  const label = result.decision === 'REJECT' ? 'NO-DEAL P05' : result.decision === 'ACCEPT' ? 'BASELINE P05' : 'SELECTED P05';
+  $('#risk-selected-label').textContent = label;
+  $('#risk-selected-value').textContent = selected ? money(selected.p05_net_contribution) + ' / ' + money(selected.expected_net_contribution) : '₹0 / ₹0';
+  $('#risk-selected-name').textContent = selected ? selected.sku_id : 'NO SAFE DEAL';
 }
 
 function setTransaction(detail) {
@@ -151,10 +157,11 @@ function renderAggregate(analysis, levers, rows, metrics) {
   $('#recovery-recovered-label').textContent = global.constraint_conflict_rescue_count;
   $('#recovery-failed-label').textContent = global.constraint_conflict_count - global.constraint_conflict_rescue_count;
   $('#recovery-total-label').textContent = global.constraint_conflict_count;
-  $('#risk-copy').innerHTML = '<b class="data">' + metrics.negotiable_candidate_count + '</b> candidates evaluated · <b class="data">' + global.risk_gate_rejections + '</b> failed · <b class="data">' + (metrics.negotiable_candidate_count - global.risk_gate_rejections) + '</b> passed the P05 risk gate: <b>' + pct1(global.risk_gate_rejection_rate) + '</b> rejected.';
+  const survivors = metrics.negotiable_candidate_count - global.risk_gate_rejections;
+  $('#risk-copy').innerHTML = '<b class="data">' + metrics.negotiable_candidate_count + '</b> alternative candidates evaluated · <b class="data">' + global.risk_gate_rejections + '</b> failed the P05 gate · <b class="data">' + survivors + '</b> survived: <b>' + pct1(global.risk_gate_rejection_rate) + '</b> rejected.';
   $('#risk-evaluated').textContent = metrics.negotiable_candidate_count;
   $('#risk-rejected').textContent = global.risk_gate_rejections;
-  $('#risk-passed').textContent = metrics.negotiable_candidate_count - global.risk_gate_rejections;
+  $('#risk-passed').textContent = survivors;
   const totalLevers = Object.values(levers.by_action).reduce((sum, item) => sum + item.count, 0);
   const maximum = Math.max(...Object.values(levers.by_action).map(item => item.count), 1);
   $('#lever-tracks').innerHTML = ['SUBSTITUTION','QUANTITY','TIMING','PRICE'].map(action => {
@@ -162,7 +169,7 @@ function renderAggregate(analysis, levers, rows, metrics) {
     return '<div class="lever-track ' + (count === 0 ? 'zero' : '') + '"><b>' + action + '</b><span style="--width:' + count / maximum * 100 + '%"></span><b class="data">' + count + ' <small>' + pct1(count / (totalLevers || 1)) + '</small></b></div>';
   }).join('');
   $('#lever-total').textContent = totalLevers;
-  $('#price-detail').textContent = 'Price candidates were evaluated from the persisted alternatives, but none exceeded the strict improvement threshold. Price candidates evaluated: ' + metrics.price_candidates + ' · Passed the P05 gate: ' + metrics.price_passed_risk_gate + ' · Selected: ' + levers.by_action.PRICE.count + '.';
+  $('#price-detail').textContent = 'Price alternatives evaluated: ' + metrics.price_candidates + ' · Passed the P05 gate: ' + metrics.price_passed_risk_gate + ' · Selected: ' + levers.by_action.PRICE.count + '.';
 }
 
 async function boot() {
