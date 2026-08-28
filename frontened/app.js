@@ -149,12 +149,19 @@ function renderLiveResult(data) {
   const decision = data.decision;
   const candidate = selected || {};
   const alternatives = data.top_safe_alternatives || [];
+  const request = data.buyer_request || {};
   const decisionLabel = decision + (candidate.action_type ? ' · ' + candidate.action_type : '');
   const candidateDetails = decision === 'REJECT'
     ? '<div class="live-no-deal">NO SAFE DEAL</div>'
-    : '<div class="live-selected-grid"><span>SKU<b>' + candidate.sku_id + '</b></span><span>Quantity<b>' + candidate.quantity + '</b></span><span>Price<b>' + money(candidate.candidate_price) + '</b></span><span>Expected net<b>' + money(candidate.expected_net_contribution) + '</b></span><span>P05<b>' + money(candidate.p05_net_contribution) + '</b></span></div>';
+    : '<div class="live-selected-grid"><span>SKU<b>' + candidate.sku_id + '</b></span><span>Quantity<b>' + candidate.quantity + '</b></span><span>Unit price<b>' + money(candidate.candidate_price) + '</b></span><span>Expected net<b>' + money(candidate.expected_net_contribution) + '</b></span><span>P05<b>' + money(candidate.p05_net_contribution) + '</b></span></div>';
   const alternativeRows = alternatives.map((item, index) => '<div class="live-alt"><span>#' + (index + 1) + '</span><b>' + item.sku_id + '</b><span>' + item.action_type + '</span><span>' + money(item.expected_net_contribution) + '</span><span>P05 ' + money(item.p05_net_contribution) + '</span></div>').join('');
-  $('#live-result').innerHTML = '<div class="live-result-head"><div><p class="eyebrow">MIRROR DECISION</p><div class="live-decision ' + outcomeClass(decision) + '">' + decisionLabel + '</div></div><span class="live-proof">' + data.candidate_count + ' candidates · ' + data.survivor_count + ' safe · ' + data.risk_gate_rejections + ' rejected</span></div>' + candidateDetails + '<div class="live-why"><p class="eyebrow">WHY</p><ul>' + data.why.map(line => '<li>' + line + '</li>').join('') + '</ul></div>' + (alternativeRows ? '<div class="live-alternatives"><p class="eyebrow">TOP SAFE ALTERNATIVES</p>' + alternativeRows + '</div>' : '') + '<p class="live-disclaimer">Fresh deterministic evaluation on MIRROR\'s locked merchant state. This request is not added to the 500 persisted experiment rows and is not presented as production traffic.</p>';
+  const constraintNote = request.baseline_feasible
+    ? 'Baseline cost fits the buyer budget ceiling.'
+    : 'Baseline is outside the buyer budget and/or fulfilment constraints; MIRROR searched for a safe recovery.';
+  const alternativesBlock = alternativeRows
+    ? '<div class="live-alternatives"><p class="eyebrow">COMPETITIVE SAFE ALTERNATIVES</p>' + alternativeRows + '</div>'
+    : '';
+  $('#live-result').innerHTML = '<div class="live-result-head"><div><p class="eyebrow">MIRROR DECISION</p><div class="live-decision ' + outcomeClass(decision) + '">' + decisionLabel + '</div></div><span class="live-proof">' + data.candidate_count + ' candidates · ' + data.survivor_count + ' safe · ' + data.risk_gate_rejections + ' rejected</span></div>' + candidateDetails + '<p class="live-budget-note">' + constraintNote + '</p><div class="live-why"><p class="eyebrow">WHY</p><ul>' + data.why.map(line => '<li>' + line + '</li>').join('') + '</ul></div>' + alternativesBlock + '<p class="live-disclaimer">Fresh deterministic evaluation on MIRROR\'s locked merchant state. This request is not added to the 500 persisted experiment rows and is not presented as production traffic.</p>';
 }
 
 async function runLiveDecision() {
@@ -188,32 +195,23 @@ async function runLiveDecision() {
 function setupLiveRoom(skus) {
   state.skus = skus;
   const select = $('#live-sku');
-  select.innerHTML = skus.map(sku => '<option value="' + sku.sku_id + '">' + sku.sku_id + ' · ' + sku.brand + ' · ' + sku.ram_gb + 'GB / ' + sku.storage_gb + 'GB</option>').join('');
-  const first = skus[0];
-  if (first) $('#live-budget').value = Math.round(first.current_price * Number($('#live-quantity').value) * 0.95);
-  $('#live-deadline').addEventListener('input', event => $('#live-deadline-value').textContent = event.target.value + ' days');
-  $('#live-quantity').addEventListener('input', () => { const sku = state.skus.find(item => item.sku_id === select.value); if (sku) $('#live-budget').placeholder = Math.round(sku.current_price * Number($('#live-quantity').value || 1)); });
-  $('#live-analyze').onclick = runLiveDecision;
+  select.innerHTML = skus.map(sku => '<option value="' + sku.sku_id + '">' + sku.sku_id + ' · ' + sku.brand + ' · ' + sku.ram_gb + 'GB · ' + sku.storage_gb + 'GB</option>').join('');
+  $('#live-analyze').addEventListener('click', runLiveDecision);
+  $('#live-deadline').addEventListener('input', event => { $('#live-deadline-value').textContent = event.target.value + ' DAYS'; });
 }
 
 async function boot() {
-  const payload = await Promise.all([get('/dashboard/analysis'), get('/dashboard/levers'), get('/dashboard/requests'), get('/dashboard/product-metrics'), get('/skus')]);
-  const analysis = payload[0], levers = payload[1], rows = payload[2], metrics = payload[3], skus = payload[4];
-  state.rows = rows;
-  document.querySelector('.console-head span').textContent = rows.length + ' persisted request decisions';
-  [...new Set(rows.map(row => row.seed))].forEach(seed => $('#seed').add(new Option(seed, seed)));
-  [...new Set(rows.map(row => row.classification))].forEach(classification => $('#class-filter').add(new Option(classification, classification)));
-  state.defaultRow = rows.find(row => row.decision === 'NEGOTIATE' && row.lever === 'SUBSTITUTION') || rows[0];
-  renderAggregate(analysis, levers, rows, metrics);
-  populateExplorer();
-  setupLiveRoom(skus);
-  $('#load').onclick = () => select($('#seed').value, $('#request-id').value);
-  $('#analyze').onclick = () => { select(state.defaultRow.seed, state.defaultRow.request_id); $('#request').scrollIntoView(); };
-  $('#decision-filter').onchange = populateExplorer;
-  $('#class-filter').onchange = populateExplorer;
-  $('#clear-filters').onclick = () => { $('#decision-filter').value = 'ALL'; $('#class-filter').value = 'ALL'; populateExplorer(); };
-  renderIntelligenceCore($('#hero-core'), { decision:'REJECT', classification:'IDLE' }, 'hero');
-  select(state.defaultRow.seed, state.defaultRow.request_id);
+  try {
+    const [dashboard, skus] = await Promise.all([get('/dashboard'), get('/skus')]);
+    state.rows = dashboard.requests || [];
+    state.defaultRow = state.rows[0];
+    setupLiveRoom(skus);
+    if (state.defaultRow) await select(state.defaultRow.seed, state.defaultRow.request_id);
+    renderAggregate(dashboard.analysis, dashboard.levers, state.rows, dashboard.metrics);
+    populateExplorer();
+  } catch (error) {
+    console.error(error);
+  }
 }
 
-boot().catch(error => { document.body.innerHTML = '<pre>' + error.message + '</pre>'; });
+boot();
