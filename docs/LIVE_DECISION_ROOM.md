@@ -33,17 +33,37 @@ ACCEPT / NEGOTIATE / REJECT
 - Timing flexibility
 - Substitution tolerance
 
+## Live baseline rule
+
+For a fresh request, the baseline is feasible only when **both** conditions hold:
+
+1. locked merchant availability can support the requested quantity by the deadline; and
+2. the requested transaction total fits the buyer's budget ceiling after the selected price-flexibility tolerance.
+
+This prevents the live room from accepting a transaction that is physically possible but economically outside the buyer's stated budget.
+
+The persisted 500-request artifacts are not regenerated or changed by the live room.
+
+## Recommendation rule
+
+- **ACCEPT:** the baseline is feasible and no safe alternative clears MIRROR's strict improvement threshold.
+- **NEGOTIATE:** the baseline is infeasible but a safe recovery exists, or a safe alternative materially beats a feasible baseline.
+- **REJECT:** no safe transaction survives the locked constraints and P05 downside gate.
+
+The UI shows only **competitive safe alternatives**. When the baseline is already the best choice, weaker safe candidates are not presented as recommendations.
+
 ## Output
 
 The room returns:
 
 - final decision
 - baseline feasibility
+- baseline transaction total and buyer budget ceiling
 - number of candidates evaluated
 - P05 gate rejections
 - safe survivor count
 - selected candidate, when one exists
-- top safe alternatives
+- competitive safe alternatives only
 - a short field-backed explanation of why the decision won
 
 ## Evidence boundary
