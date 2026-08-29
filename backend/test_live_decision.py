@@ -12,7 +12,7 @@ class LiveDecisionTests(unittest.TestCase):
         cls.client = TestClient(app)
         cls.sku = load_locked_data()["catalog_skus"][0]
 
-    def test_live_decision_accepts_valid_fresh_request(self):
+    def test_live_decision_uses_ml_as_second_gate(self):
         response = self.client.post(
             "/ai/live-decision",
             json={
@@ -28,11 +28,13 @@ class LiveDecisionTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertEqual(body["mode"], "LIVE_REQUEST")
         self.assertIn(body["decision"], {"ACCEPT", "NEGOTIATE", "REJECT"})
-        self.assertGreaterEqual(body["candidate_count"], body["survivor_count"])
-        self.assertEqual(body["risk_gate_rejections"], body["candidate_count"] - body["survivor_count"])
-        self.assertTrue(body["evidence_status"].startswith("FRESH_DETERMINISTIC"))
+        self.assertIn("ml", body)
+        self.assertTrue(body["ml"]["applied"])
+        self.assertEqual(body["ml"]["ml_evaluated_count"], body["ml"]["p05_survivor_count"])
+        self.assertEqual(body["ml_gate_rejections"], body["ml"]["ml_rejections"])
+        self.assertGreaterEqual(body["candidate_count"], body["p05_gate_rejections"])
+        self.assertTrue(body["evidence_status"].startswith("FRESH_DETERMINISTIC_EVALUATION_WITH_LIVE_ML"))
 
     def test_live_budget_is_a_real_baseline_constraint(self):
         quantity = 25
@@ -55,6 +57,26 @@ class LiveDecisionTests(unittest.TestCase):
         self.assertFalse(body["buyer_request"]["baseline_feasible"])
         self.assertGreater(body["buyer_request"]["baseline_transaction_total"], body["buyer_request"]["buyer_budget_ceiling"])
         self.assertNotEqual(body["decision"], "ACCEPT")
+
+    def test_high_budget_does_not_force_a_substitution(self):
+        response = self.client.post(
+            "/ai/live-decision",
+            json={
+                "sku_id": self.sku["sku_id"],
+                "requested_quantity": 19,
+                "budget": 150000000,
+                "deadline_days": 7,
+                "price_flexibility": "Medium",
+                "quantity_flexibility": "Medium",
+                "timing_flexibility": "Medium",
+                "substitution_tolerance": 1,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        if body["decision"] == "NEGOTIATE":
+            self.assertNotEqual(body["selected"]["action_type"], "SUBSTITUTION")
+        self.assertTrue(body["buyer_request"]["baseline_feasible"])
 
     def test_live_rejects_misleading_fallback_suggestions(self):
         response = self.client.post(
