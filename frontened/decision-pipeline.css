@@ -1,44 +1,37 @@
 @media(min-width:601px){.decision-core.compact{height:560px;min-height:560px}}
 
-/* Cinematic scroll transition: sections melt into one another as the story moves deeper. */
+/* Refined scroll transitions: movement + opacity only. No blur, no filters, no forced snapping. */
 html{scroll-behavior:smooth;scroll-padding-top:5vh}
 body{overflow-x:hidden}
 
-@supports(animation-timeline:view()){
-  .shell>.section{
-    view-timeline-name:--mirror-section;
-    view-timeline-axis:block;
-    animation-name:mirrorSectionDepth;
-    animation-timeline:--mirror-section;
-    animation-range:entry 0% exit 100%;
-    animation-fill-mode:both;
-  }
-
-  @keyframes mirrorSectionDepth{
-    0%{opacity:0;transform:translate3d(0,38px,0) scale(.975);filter:blur(7px)}
-    16%{opacity:.72;transform:translate3d(0,14px,0) scale(.99);filter:blur(2px)}
-    30%,68%{opacity:1;transform:translate3d(0,0,0) scale(1);filter:blur(0)}
-    84%{opacity:.82;transform:translate3d(0,-10px,0) scale(.995);filter:blur(1.5px)}
-    100%{opacity:0;transform:translate3d(0,-34px,0) scale(.975);filter:blur(7px)}
-  }
-
-  .shell>.section::after{
-    content:"";
-    position:absolute;
-    inset:0;
-    z-index:-1;
-    pointer-events:none;
-    opacity:0;
-    background:radial-gradient(circle at 50% 45%,rgba(255,255,255,.045),transparent 48%);
-    animation:mirrorSectionGlow linear both;
-    animation-timeline:--mirror-section;
-    animation-range:entry 0% exit 100%;
-  }
-
-  @keyframes mirrorSectionGlow{
-    0%,100%{opacity:0;transform:scale(.96)}
-    30%,68%{opacity:.8;transform:scale(1)}
-  }
+.shell>.section{
+  opacity:.62;
+  transform:translate3d(0,28px,0) scale(.985);
+  transform-origin:center center;
+  transition:opacity 650ms cubic-bezier(.22,1,.36,1),transform 750ms cubic-bezier(.22,1,.36,1);
+  will-change:opacity,transform;
 }
 
-@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+.shell>.section.is-active{
+  opacity:1;
+  transform:translate3d(0,0,0) scale(1);
+}
+
+.shell>.section::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  z-index:-1;
+  pointer-events:none;
+  opacity:0;
+  background:radial-gradient(circle at 50% 45%,rgba(255,255,255,.028),transparent 52%);
+  transition:opacity 800ms ease,transform 900ms cubic-bezier(.22,1,.36,1);
+  transform:scale(.985);
+}
+
+.shell>.section.is-active::after{opacity:1;transform:scale(1)}
+
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  .shell>.section,.shell>.section::after{transition:none!important;transform:none!important;opacity:1!important}
+}
