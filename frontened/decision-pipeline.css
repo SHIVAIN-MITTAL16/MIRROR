@@ -1,37 +1,52 @@
 @media(min-width:601px){.decision-core.compact{height:560px;min-height:560px}}
 
-/* Refined scroll transitions: movement + opacity only. No blur, no filters, no forced snapping. */
-html{scroll-behavior:smooth;scroll-padding-top:5vh}
-body{overflow-x:hidden}
+/* Cinematic scroll-story transition: sections overlap like a presentation. */
+html{scroll-behavior:auto}
+body{overflow-x:hidden;background:#050507}
 
-.shell>.section{
-  opacity:.62;
-  transform:translate3d(0,28px,0) scale(.985);
-  transform-origin:center center;
-  transition:opacity 650ms cubic-bezier(.22,1,.36,1),transform 750ms cubic-bezier(.22,1,.36,1);
-  will-change:opacity,transform;
+@media(min-width:701px){
+  .shell{position:relative}
+
+  .shell>.section{
+    position:sticky;
+    top:0;
+    min-height:100svh;
+    box-sizing:border-box;
+    isolation:isolate;
+    opacity:0;
+    transform:translate3d(0,24px,0);
+    transition:opacity 780ms cubic-bezier(.22,1,.36,1),transform 900ms cubic-bezier(.22,1,.36,1);
+    will-change:opacity,transform;
+    z-index:1;
+  }
+
+  .shell>.section:first-child{opacity:1;transform:translate3d(0,0,0)}
+
+  .shell>.section.is-before{opacity:0;transform:translate3d(0,-18px,0)}
+  .shell>.section.is-active{opacity:1;transform:translate3d(0,0,0)}
+  .shell>.section.is-after{opacity:0;transform:translate3d(0,24px,0)}
+
+  /* Keep the incoming section above the outgoing section so the two can crossfade. */
+  .shell>.section:nth-child(1){z-index:1}
+  .shell>.section:nth-child(2){z-index:2}
+  .shell>.section:nth-child(3){z-index:3}
+  .shell>.section:nth-child(4){z-index:4}
+  .shell>.section:nth-child(5){z-index:5}
+  .shell>.section:nth-child(6){z-index:6}
+  .shell>.section:nth-child(7){z-index:7}
+  .shell>.section:nth-child(8){z-index:8}
+  .shell>.section:nth-child(9){z-index:9}
+  .shell>.section:nth-child(10){z-index:10}
+
+  /* Preserve existing layouts; the transition is the only cinematic layer. */
+  .shell>.section:not(.hero){padding-top:clamp(72px,8vh,112px);padding-bottom:clamp(72px,8vh,112px)}
 }
 
-.shell>.section.is-active{
-  opacity:1;
-  transform:translate3d(0,0,0) scale(1);
+@media(max-width:700px){
+  .shell>.section{opacity:1;transform:none;transition:none}
 }
-
-.shell>.section::after{
-  content:"";
-  position:absolute;
-  inset:0;
-  z-index:-1;
-  pointer-events:none;
-  opacity:0;
-  background:radial-gradient(circle at 50% 45%,rgba(255,255,255,.028),transparent 52%);
-  transition:opacity 800ms ease,transform 900ms cubic-bezier(.22,1,.36,1);
-  transform:scale(.985);
-}
-
-.shell>.section.is-active::after{opacity:1;transform:scale(1)}
 
 @media(prefers-reduced-motion:reduce){
   html{scroll-behavior:auto}
-  .shell>.section,.shell>.section::after{transition:none!important;transform:none!important;opacity:1!important}
+  .shell>.section{transition:none!important;transform:none!important;opacity:1!important}
 }
