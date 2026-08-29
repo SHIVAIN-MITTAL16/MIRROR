@@ -21,7 +21,6 @@ function caseCard(item) {
   }
   return '<article class="ml-risk__case"><span class="ml-risk__label">CASE 02 · SAFER ALTERNATIVE</span><h3>Substitution → PRICE after the ML safety check</h3>' +
     row('Seed / request', item.seed + ' / ' + item.request_id) +
-    row('Seed / request', item.seed + ' / ' + item.request_id) +
     row('Old SLA miss', pct(item.old_actual_sla_miss), 'ml-risk__risk') +
     row('Old expected net', money(item.old_expected_net)) +
     row('New expected net', money(item.new_expected_net), 'ml-risk__risk') +
