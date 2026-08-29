@@ -1,11 +1,18 @@
 """AI-facing and live-decision ASGI entrypoint for MIRROR.
 
 The original ``backend.main:app`` remains the deterministic decision engine.
-This entrypoint adds the interactive live-decision surface without changing the
-persisted experiment artifacts or the deterministic selection rules.
+This entrypoint adds the interactive live-decision surface and applies the
+learned SLA-risk model as a second safety gate after deterministic P05 filtering.
 
-Run locally with:
-    uvicorn backend.ai_app:app --host 0.0.0.0 --port 8002
+Architecture:
+    1. MIRROR generates/evaluates candidates with Monte Carlo + P05.
+    2. P05 removes candidates with unacceptable downside risk.
+    3. ML scores the remaining live candidates for SLA-miss risk.
+    4. A candidate must pass BOTH gates to be eligible for a live recommendation.
+    5. The deterministic engine remains the source of economic/constraint logic;
+       ML is a safety veto, not an autonomous transaction generator.
+
+The persisted 500-request experiment remains untouched.
 """
 
 import hashlib
@@ -22,6 +29,7 @@ from backend.main import (
     eligible_substitute_skus,
     evaluate_request_decision,
     load_locked_data,
+    score_candidate,
 )
 from backend.risk_model import get_risk_model, risk_features_for_request
 
@@ -81,11 +89,6 @@ def _live_request(payload: LiveDecisionRequest) -> tuple[dict, int]:
         payload.substitution_tolerance,
     )
 
-    # The persisted classifier historically treated "baseline feasible" as an
-    # inventory-only concept. That is not sufficient for an interactive buyer
-    # request: the buyer's budget is an explicit hard constraint. Keep the
-    # persisted 500-row artifacts untouched, but make the live room honest by
-    # requiring both fulfilment availability and an affordable baseline.
     availability = available_for_window(state, payload.deadline_days)
     inventory_feasible = payload.requested_quantity <= availability["available"]
     buyer_ceiling = buyer_total_ceiling({
@@ -109,11 +112,6 @@ def _live_request(payload: LiveDecisionRequest) -> tuple[dict, int]:
     if baseline_feasible:
         live_classification = classification["classification"]
     else:
-        # A live request that fails either inventory or budget is a conflict if
-        # the request still exposes at least one negotiation lever. The actual
-        # candidate engine remains the final authority on whether a safe deal
-        # exists; this label only prevents an impossible request from becoming
-        # a misleading ACCEPT.
         has_budget_lever = (
             payload.price_flexibility != "Low"
             or payload.quantity_flexibility != "Low"
@@ -158,24 +156,125 @@ def _live_request(payload: LiveDecisionRequest) -> tuple[dict, int]:
     return request, experiment_seed
 
 
-def _competitive_alternatives(result: dict, request: dict) -> list[dict]:
-    """Return only safe alternatives that are genuinely competitive.
+def _ml_score_candidate(candidate: dict, model) -> dict:
+    """Run the learned SLA-risk model on the exact live candidate."""
+    data = load_locked_data()
+    state = data["merchant_states_by_sku"][candidate["sku_id"]]
+    features = risk_features_for_request(
+        state,
+        candidate["quantity"],
+        candidate["delivery_window_days"],
+    )
+    probability = model.predict_probability(features)
+    return {
+        **candidate,
+        "ml_sla_miss_probability": round(probability, 6),
+        "ml_risk_level": "HIGH" if probability >= model.threshold else "LOW",
+        "ml_passes_safety_gate": probability < model.threshold,
+        "ml_top_feature_contributions": model.explain(features),
+        "ml_model_version": model.version,
+        "ml_threshold": model.threshold,
+    }
 
-    For a feasible baseline, an alternative must clear the exact same strict
-    improvement threshold used by the decision rule. For an infeasible
-    baseline, every risk-gated survivor is a legitimate recovery candidate.
-    This prevents the UI from calling a merely safe-but-worse option a "top
-    alternative" after MIRROR has already decided to keep the baseline.
+
+def _apply_live_ml_gate(result: dict, request: dict) -> dict:
+    """Apply ML as a second safety gate to the fresh live decision.
+
+    P05 remains the first gate. ML is the second. The baseline is also scored
+    when feasible, so the model can actually prevent acceptance of a high-risk
+    baseline and force recovery through a safer candidate.
     """
-    survivors = [
-        candidate
-        for candidate in result.get("candidates", [])
+    model = get_risk_model()
+    p05_survivors = [
+        candidate for candidate in result.get("candidates", [])
         if candidate.get("passes_risk_gate")
+    ]
+
+    baseline_ml = None
+    if request["baseline_feasible"] and result.get("reference"):
+        baseline_ml = _ml_score_candidate(result["reference"], model)
+
+    ml_survivors = [_ml_score_candidate(candidate, model) for candidate in p05_survivors]
+    ml_passers = [candidate for candidate in ml_survivors if candidate["ml_passes_safety_gate"]]
+    ml_rejections = len(ml_survivors) - len(ml_passers)
+
+    reference_score = result.get("reference_score", 0)
+    improvement_threshold = reference_score + 0.05 * abs(reference_score)
+    baseline_ml_pass = bool(baseline_ml and baseline_ml["ml_passes_safety_gate"])
+    best = None
+    decision = "REJECT"
+
+    if request["baseline_feasible"] and baseline_ml_pass:
+        competitive = [
+            candidate for candidate in ml_passers
+            if candidate.get("score", score_candidate(
+                candidate["expected_net_contribution"],
+                candidate["p05_net_contribution"],
+                result.get("reference_p05", 0),
+            )) > improvement_threshold
+        ]
+        if competitive:
+            best = max(competitive, key=lambda candidate: candidate.get("score", float("-inf")))
+            decision = "NEGOTIATE"
+        else:
+            decision = "ACCEPT"
+            best = baseline_ml
+    elif ml_passers:
+        # Baseline is infeasible or ML-unsafe. A passing candidate is a genuine
+        # recovery path even when it is not economically better than baseline.
+        best = max(ml_passers, key=lambda candidate: candidate.get("score", float("-inf")))
+        decision = "NEGOTIATE"
+
+    by_identity = {
+        (
+            candidate["sku_id"], candidate["quantity"],
+            candidate["delivery_window_days"], candidate["candidate_price"],
+        ): candidate
+        for candidate in ml_survivors
+    }
+    annotated_candidates = []
+    for candidate in result.get("candidates", []):
+        key = (
+            candidate["sku_id"], candidate["quantity"],
+            candidate["delivery_window_days"], candidate["candidate_price"],
+        )
+        annotated_candidates.append(by_identity.get(key, candidate))
+
+    selected = baseline_ml if decision == "ACCEPT" else best
+    result.update({
+        "decision": decision,
+        "best_candidate": best if decision == "NEGOTIATE" else None,
+        "candidates": annotated_candidates,
+        "ml": {
+            "applied": True,
+            "model_version": model.version,
+            "threshold": model.threshold,
+            "p05_survivor_count": len(p05_survivors),
+            "ml_evaluated_count": len(ml_survivors),
+            "ml_rejections": ml_rejections,
+            "ml_pass_count": len(ml_passers),
+            "baseline_evaluated": baseline_ml is not None,
+            "baseline_passed": baseline_ml_pass if baseline_ml is not None else None,
+            "baseline_probability": baseline_ml["ml_sla_miss_probability"] if baseline_ml else None,
+            "selected_probability": selected["ml_sla_miss_probability"] if selected else None,
+            "selected_passed": selected["ml_passes_safety_gate"] if selected else False,
+        },
+        "selected_with_ml": selected,
+        "final_safe_count": len(ml_passers) + (1 if baseline_ml_pass else 0),
+    })
+    return result
+
+
+def _competitive_alternatives(result: dict, request: dict) -> list[dict]:
+    """Return only candidates that pass BOTH P05 and ML and are competitive."""
+    survivors = [
+        candidate for candidate in result.get("candidates", [])
+        if candidate.get("passes_risk_gate") and candidate.get("ml_passes_safety_gate")
     ]
     if not survivors:
         return []
 
-    if request["baseline_feasible"]:
+    if request["baseline_feasible"] and result.get("ml", {}).get("baseline_passed"):
         reference_score = result.get("reference_score", 0)
         threshold = reference_score + 0.05 * abs(reference_score)
         survivors = [candidate for candidate in survivors if candidate.get("score", 0) > threshold]
@@ -208,18 +307,14 @@ def risk_model_info():
 
 @APP.post("/ai/risk/predict")
 def predict_risk(payload: RiskPredictionRequest):
-    """Predict SLA-miss risk without changing the deterministic decision engine."""
+    """Predict SLA-miss risk for a concrete live request."""
     data = load_locked_data()
     state = data["merchant_states_by_sku"].get(payload.sku_id)
     if state is None:
         raise HTTPException(status_code=404, detail="SKU not found")
 
     model = get_risk_model()
-    features = risk_features_for_request(
-        state,
-        payload.requested_quantity,
-        payload.delivery_window_days,
-    )
+    features = risk_features_for_request(state, payload.requested_quantity, payload.delivery_window_days)
     probability = model.predict_probability(features)
     return {
         "sku_id": payload.sku_id,
@@ -227,6 +322,7 @@ def predict_risk(payload: RiskPredictionRequest):
         "delivery_window_days": payload.delivery_window_days,
         "sla_miss_probability": round(probability, 6),
         "risk_level": "HIGH" if probability >= model.threshold else "LOW",
+        "passes_safety_gate": probability < model.threshold,
         "threshold": model.threshold,
         "model_version": model.version,
         "top_feature_contributions": model.explain(features),
@@ -237,29 +333,24 @@ def predict_risk(payload: RiskPredictionRequest):
 
 @APP.post("/ai/live-decision")
 def live_decision(payload: LiveDecisionRequest):
-    """Evaluate a fresh user request with MIRROR's real deterministic engine."""
+    """Evaluate a fresh request through deterministic MIRROR + live ML safety."""
     request, experiment_seed = _live_request(payload)
     result = evaluate_request_decision(request, experiment_seed)
-    selected = (
-        result.get("best_candidate")
-        if result["decision"] == "NEGOTIATE"
-        else result.get("reference")
-        if result["decision"] == "ACCEPT"
-        else None
-    )
+    result = _apply_live_ml_gate(result, request)
+
+    selected = result.get("selected_with_ml")
     survivors = [
-        candidate
-        for candidate in result.get("candidates", [])
-        if candidate.get("passes_risk_gate")
+        candidate for candidate in result.get("candidates", [])
+        if candidate.get("passes_risk_gate") and candidate.get("ml_passes_safety_gate")
     ]
     alternatives = _competitive_alternatives(result, request)
 
     if result["decision"] == "NEGOTIATE":
-        if request["baseline_feasible"]:
+        if request["baseline_feasible"] and result["ml"].get("baseline_passed"):
             why = [
-                "The requested transaction is feasible, but a better safe option was found.",
-                f"{len(result['candidates'])} alternatives were evaluated; {len(survivors)} survived the P05 gate.",
-                f"The selected {selected['action_type'].lower()} option cleared the strict improvement threshold and scored highest among safe candidates.",
+                "The requested transaction passed inventory, budget, P05 and ML SLA-risk checks, but a better safe option was found.",
+                f"{len(result['candidates'])} alternatives were evaluated; {result['risk_gate_rejections']} failed P05, then {result['ml']['ml_rejections']} of the P05 survivors failed the ML safety gate.",
+                f"The selected {selected['action_type'].lower()} option passed both safety gates and cleared the strict improvement threshold.",
             ]
         else:
             reasons = []
@@ -267,17 +358,19 @@ def live_decision(payload: LiveDecisionRequest):
                 reasons.append("available inventory is insufficient for the requested quantity by the deadline")
             if request["baseline_transaction_total"] > request["buyer_budget_ceiling"] + 1e-9:
                 reasons.append("the requested transaction exceeds the buyer's budget ceiling")
+            if result["ml"].get("baseline_passed") is False:
+                reasons.append("the baseline was flagged by the ML SLA-risk model")
             reason_text = " and ".join(reasons) if reasons else "the original constraints could not be met"
             why = [
-                f"The original request is not directly feasible because {reason_text}.",
-                f"{len(result['candidates'])} alternatives were evaluated; {len(survivors)} survived the P05 gate.",
-                f"MIRROR selects the highest-scoring safe recovery option: {selected['action_type'].lower()}.",
+                f"The original request is not directly safe because {reason_text}.",
+                f"{len(result['candidates'])} alternatives were evaluated; {result['risk_gate_rejections']} failed P05 and {result['ml']['ml_rejections']} additional P05 survivors failed the ML safety gate.",
+                f"MIRROR selects the highest-scoring candidate that passed both safety gates: {selected['action_type'].lower()}.",
             ]
     elif result["decision"] == "ACCEPT":
         why = [
-            "The requested transaction is feasible within inventory and the buyer's budget ceiling.",
-            f"{len(result['candidates'])} alternatives were checked, but none beat the strict improvement threshold after risk filtering.",
-            "MIRROR therefore keeps the original request as the safest choice.",
+            "The requested transaction is feasible and passed both MIRROR's deterministic P05 gate and the ML SLA-risk safety gate.",
+            f"{len(result['candidates'])} alternatives were checked; {result['risk_gate_rejections']} failed P05 and {result['ml']['ml_rejections']} P05 survivors failed ML, leaving no safer option that clears the strict improvement threshold.",
+            "MIRROR therefore keeps the original request.",
         ]
     else:
         reasons = []
@@ -285,16 +378,18 @@ def live_decision(payload: LiveDecisionRequest):
             reasons.append("inventory cannot support the requested quantity by the deadline")
         if request["baseline_transaction_total"] > request["buyer_budget_ceiling"] + 1e-9:
             reasons.append("the requested transaction exceeds the buyer's budget ceiling")
-        reason_text = " and ".join(reasons) if reasons else "no candidate satisfies the locked constraints and risk gate"
+        if result["ml"].get("baseline_passed") is False:
+            reasons.append("the baseline failed the ML SLA-risk safety gate")
+        reason_text = " and ".join(reasons) if reasons else "no candidate satisfies both safety gates and the locked constraints"
         why = [
             f"No safe transaction satisfies the request because {reason_text}.",
-            f"{len(result['candidates'])} alternatives were checked and {len(survivors)} survived the P05 gate.",
+            f"{len(result['candidates'])} alternatives were checked; {result['risk_gate_rejections']} failed P05 and {result['ml']['ml_rejections']} failed the ML safety gate.",
             "MIRROR recommends no safe deal instead of inventing a transaction.",
         ]
 
     return {
         "mode": "LIVE_REQUEST",
-        "evidence_status": "FRESH_DETERMINISTIC_EVALUATION_ON_LOCKED_MERCHANT_STATE",
+        "evidence_status": "FRESH_DETERMINISTIC_EVALUATION_WITH_LIVE_ML_SAFETY_GATE",
         "buyer_request": {
             "sku_id": request["target_sku_id"],
             "quantity": request["requested_quantity"],
@@ -314,12 +409,15 @@ def live_decision(payload: LiveDecisionRequest):
         },
         "decision": result["decision"],
         "baseline": result.get("reference"),
+        "baseline_ml": result.get("ml", {}).get("baseline_probability"),
         "candidate_count": len(result.get("candidates", [])),
-        "risk_gate_rejections": result.get("risk_gate_rejections", 0),
+        "p05_gate_rejections": result.get("risk_gate_rejections", 0),
+        "ml_gate_rejections": result.get("ml", {}).get("ml_rejections", 0),
         "survivor_count": len(survivors),
         "selected": selected,
         "top_safe_alternatives": alternatives,
         "why": why,
+        "ml": result.get("ml"),
         "execution": {"available": False, "reason": "Live decisions are not persisted payment orders."},
     }
 
