@@ -77,7 +77,7 @@ class RiskModel:
         score = float(np.dot(x, np.asarray(self.weights)) + self.bias)
         # Clipping avoids overflow in exp() for deliberately extreme inputs.
         score = float(np.clip(score, -40.0, 40.0))
-        return 1.0 / (1.0 + np.exp(-score))
+        return float(1.0 / (1.0 + np.exp(-score)))
 
     def explain(self, features: Sequence[float], top_k: int = 4) -> List[Dict[str, float]]:
         """Return signed feature contributions for a human-readable audit view."""
