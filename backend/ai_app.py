@@ -94,23 +94,25 @@ def _live_request(payload: LiveDecisionRequest) -> tuple[dict, int]:
     # If the exact requested SKU already satisfies the buyer's constraints,
     # MIRROR must not replace it merely because a substitute happens to score
     # slightly higher. This is especially important for very large budgets.
-    substitution_tolerance = payload.substitution_tolerance if not baseline_feasible else 0
     substitutes = eligible_substitute_skus(
         data["catalog_skus"],
         payload.sku_id,
         target["brand"],
         target["ram_gb"],
         target["storage_gb"],
-        substitution_tolerance,
+        payload.substitution_tolerance if not baseline_feasible else 0,
     )
-    flexibility["substitution_tolerance"] = substitution_tolerance
 
+    classification_flexibility = {
+        **flexibility,
+        "substitution_tolerance": payload.substitution_tolerance if not baseline_feasible else 0,
+    }
     classification = classify_buyer_request(
         target,
         state,
         payload.requested_quantity,
         payload.deadline_days,
-        flexibility,
+        classification_flexibility,
         substitutes,
         data["merchant_states_by_sku"],
     )
@@ -139,7 +141,6 @@ def _live_request(payload: LiveDecisionRequest) -> tuple[dict, int]:
         "budget": payload.budget,
         "deadline_days": payload.deadline_days,
         **flexibility,
-        "substitution_tolerance": substitution_tolerance,
         "baseline_feasible": baseline_feasible,
         "classification": live_classification,
         "availability": availability,
@@ -434,3 +435,13 @@ def inventory_feasible_for_live(request: dict) -> bool:
     data = load_locked_data()
     state = data["merchant_states_by_sku"][request["target_sku_id"]]
     return request["requested_quantity"] <= available_for_window(state, request["deadline_days"])["available"]
+
+
+@APP.get("/ai/risk/health")
+def risk_health():
+    """Small readiness check that also verifies the model can be loaded."""
+    model = get_risk_model()
+    return {"status": "ok", "model_version": model.version}
+
+
+app = APP
