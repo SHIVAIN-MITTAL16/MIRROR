@@ -150,25 +150,31 @@ function renderLiveResult(data) {
   const candidate = selected || {};
   const alternatives = data.top_safe_alternatives || [];
   const request = data.buyer_request || {};
+  const ml = data.ml || {};
   const decisionLabel = decision + (candidate.action_type ? ' · ' + candidate.action_type : '');
   const candidateDetails = decision === 'REJECT'
     ? '<div class="live-no-deal">NO SAFE DEAL</div>'
     : '<div class="live-selected-grid"><span>SKU<b>' + candidate.sku_id + '</b></span><span>Quantity<b>' + candidate.quantity + '</b></span><span>Unit price<b>' + money(candidate.candidate_price) + '</b></span><span>Expected net<b>' + money(candidate.expected_net_contribution) + '</b></span><span>P05<b>' + money(candidate.p05_net_contribution) + '</b></span></div>';
-  const alternativeRows = alternatives.map((item, index) => '<div class="live-alt"><span>#' + (index + 1) + '</span><b>' + item.sku_id + '</b><span>' + item.action_type + '</span><span>' + money(item.expected_net_contribution) + '</span><span>P05 ' + money(item.p05_net_contribution) + '</span></div>').join('');
+  const alternativeRows = alternatives.map((item, index) => '<div class="live-alt"><span>#' + (index + 1) + '</span><b>' + item.sku_id + '</b><span>' + item.action_type + '</span><span>' + money(item.expected_net_contribution) + '</span><span>P05 ' + money(item.p05_net_contribution) + '</span><span>ML ' + pct(item.ml_sla_miss_probability) + '</span></div>').join('');
   const constraintNote = request.baseline_feasible
     ? 'Baseline cost fits the buyer budget ceiling.'
     : 'Baseline is outside the buyer budget and/or fulfilment constraints; MIRROR searched for a safe recovery.';
   const alternativesBlock = alternativeRows
-    ? '<div class="live-alternatives"><p class="eyebrow">COMPETITIVE SAFE ALTERNATIVES</p>' + alternativeRows + '</div>'
+    ? '<div class="live-alternatives"><p class="eyebrow">COMPETITIVE SAFE ALTERNATIVES · BOTH GATES PASSED</p>' + alternativeRows + '</div>'
     : '';
-  $('#live-result').innerHTML = '<div class="live-result-head"><div><p class="eyebrow">MIRROR DECISION</p><div class="live-decision ' + outcomeClass(decision) + '">' + decisionLabel + '</div></div><span class="live-proof">' + data.candidate_count + ' candidates · ' + data.survivor_count + ' safe · ' + data.risk_gate_rejections + ' rejected</span></div>' + candidateDetails + '<p class="live-budget-note">' + constraintNote + '</p><div class="live-why"><p class="eyebrow">WHY</p><ul>' + data.why.map(line => '<li>' + line + '</li>').join('') + '</ul></div>' + alternativesBlock + '<p class="live-disclaimer">Fresh deterministic evaluation on MIRROR\'s locked merchant state. This request is not added to the 500 persisted experiment rows and is not presented as production traffic.</p>';
+  const baselineProbability = ml.baseline_probability == null ? '—' : pct(ml.baseline_probability);
+  const selectedProbability = ml.selected_probability == null ? '—' : pct(ml.selected_probability);
+  const baselineStatus = ml.baseline_evaluated ? (ml.baseline_passed ? 'PASS' : 'BLOCKED') : 'NOT SCORED';
+  const selectedStatus = selected ? (ml.selected_passed ? 'PASS' : 'BLOCKED') : 'NO DEAL';
+  const mlBlock = '<div class="live-ml"><div class="live-ml-head"><div><p class="eyebrow">ML SLA-RISK SAFETY GATE</p><strong>' + (ml.applied ? 'LIVE MODEL ACTIVE' : 'NOT APPLIED') + '</strong></div><span>Threshold ' + (ml.threshold ?? '—') + '</span></div><div class="live-ml-grid"><div><span>Model</span><b>' + (ml.model_version || '—') + '</b></div><div><span>P05 survivors</span><b>' + (ml.p05_survivor_count ?? 0) + '</b></div><div><span>ML rejected</span><b>' + (ml.ml_rejections ?? 0) + '</b></div><div><span>ML passed</span><b>' + (ml.ml_pass_count ?? 0) + '</b></div><div><span>Baseline risk</span><b>' + baselineProbability + ' · ' + baselineStatus + '</b></div><div><span>Selected risk</span><b>' + selectedProbability + ' · ' + selectedStatus + '</b></div></div><p class="live-ml-note">P05 answers “is the downside acceptable?” ML answers “does this specific candidate look likely to miss SLA?” A recommendation must pass both.</p></div>';
+  $('#live-result').innerHTML = '<div class="live-result-head"><div><p class="eyebrow">MIRROR DECISION</p><div class="live-decision ' + outcomeClass(decision) + '">' + decisionLabel + '</div></div><span class="live-proof">' + data.candidate_count + ' candidates · ' + (data.p05_gate_rejections ?? 0) + ' P05 rejected · ' + (data.ml_gate_rejections ?? 0) + ' ML rejected · ' + data.survivor_count + ' safe</span></div>' + candidateDetails + '<p class="live-budget-note">' + constraintNote + '</p>' + mlBlock + '<div class="live-why"><p class="eyebrow">WHY</p><ul>' + data.why.map(line => '<li>' + line + '</li>').join('') + '</ul></div>' + alternativesBlock + '<p class="live-disclaimer">Fresh deterministic evaluation on MIRROR\'s locked merchant state plus a live ML safety prediction. This request is not added to the 500 persisted experiment rows and is not presented as production traffic.</p>';
 }
 
 async function runLiveDecision() {
   const status = $('#live-status');
   const button = $('#live-analyze');
   button.disabled = true;
-  status.textContent = 'Running candidate search → Monte Carlo → P05 gate…';
+  status.textContent = 'Running candidate search → Monte Carlo → P05 → live ML safety gate…';
   try {
     const payload = {
       sku_id: $('#live-sku').value,
@@ -183,7 +189,7 @@ async function runLiveDecision() {
     const response = await fetch('/ai/live-decision', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     if (!response.ok) throw Error(await response.text());
     renderLiveResult(await response.json());
-    status.textContent = 'Decision complete. The result came from the same MIRROR engine used by the persisted experiment.';
+    status.textContent = 'Decision complete. MIRROR used Monte Carlo + P05 first, then the live ML SLA-risk gate on the surviving candidates.';
   } catch (error) {
     $('#live-result').innerHTML = '<div class="live-error"><strong>Live decision failed.</strong><p>' + error.message + '</p></div>';
     status.textContent = 'Check the API/deployment status.';
