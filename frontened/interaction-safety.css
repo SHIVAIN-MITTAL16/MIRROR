@@ -1,0 +1,42 @@
+/* MIRROR interaction/performance guardrails.
+   Keeps the cinematic layer visual-only and guarantees the application layer
+   remains the interactive hit-testing surface. */
+.cinematic-world,
+.cinematic-world::before,
+.cinematic-world::after,
+.cinematic-world__image{pointer-events:none!important}
+
+.cinematic-world{z-index:0!important}
+.shell{position:relative!important;z-index:2!important;pointer-events:auto!important}
+.shell > .section{position:relative!important;z-index:2!important;pointer-events:auto!important}
+.cinematic-nav{z-index:100!important;pointer-events:none!important}
+.cinematic-nav .cinematic-brand,
+.cinematic-nav .cinematic-links,
+.cinematic-nav .cinematic-links a{pointer-events:auto!important}
+
+/* The animated GIF is already animated by itself. A second CSS transform
+   animation wastes GPU time and can make the UI feel frozen on Chromium. */
+.cinematic-world__image{animation:none!important;transform:scale(1.035)!important;will-change:auto!important}
+
+/* Keep the glass appearance, but do not force backdrop-filter over multiple
+   full-screen sections. This is the expensive part on many Chromium GPUs. */
+.glass,
+.request-object,
+.transaction,
+.console,
+.execution-box,
+.live-form,
+.live-result,
+.ml-risk__card,
+.ml-risk__case{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+
+/* Never let a visual layer create a click-blocking surface. */
+.shell > .section::before,
+.shell > .section::after{pointer-events:none!important}
+
+/* Preserve smooth section motion without making the whole page composited. */
+.shell > .section{will-change:auto!important}
+
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto!important}
+}
