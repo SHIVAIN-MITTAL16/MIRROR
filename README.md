@@ -4,186 +4,407 @@
 
 > **Find the transaction that survives the risk.**
 
-MIRROR is a deterministic commerce decision engine for transactions under uncertainty. It evaluates whether a buyer request should be **accepted, recovered through negotiation, or safely declined** while protecting downside risk.
+MIRROR is a **risk-aware commerce decision system** for transactions where price, inventory, quantity, delivery time, demand uncertainty, and service-level risk can change the outcome.
 
-**Live demo:** https://mirror-rrdq.onrender.com/
+Instead of only asking *“Can we sell this?”*, MIRROR asks:
 
-## Core idea
+> **“Which transaction is still safe when uncertainty is taken seriously?”**
 
-For a request, MIRROR follows:
+**Live Demo:** https://mirror-rrdq.onrender.com/
+
+---
+
+## What MIRROR does
+
+A buyer provides:
+
+- Product / SKU
+- Quantity
+- Budget
+- Delivery deadline
+- Price flexibility
+- Quantity flexibility
+- Timing flexibility
+- Substitution tolerance
+
+MIRROR then evaluates the request against the locked merchant/catalog state, generates recovery options, simulates uncertainty, filters downside risk, applies SLA-risk protection, and returns one of three outcomes:
+
+**ACCEPT · NEGOTIATE · REJECT**
+
+The live request is processed by the actual MIRROR decision pipeline. It is not an LLM chatbot and it is not a hard-coded demo response.
+
+---
+
+# The decision pipeline
 
 ```text
-BUYER REQUEST
-      ↓
-BASELINE CHECK
-      ↓
-CANDIDATE GENERATION
-      ↓
-MONTE CARLO
-      ↓
-P05 DOWNSIDE-RISK GATE
-      ↓
-SAFE SURVIVORS
-      ↓
-ACCEPT / NEGOTIATE / REJECT
-      ↓
-PAYMENT BOUNDARY
+                    BUYER REQUEST
+                         │
+                         ▼
+                BASELINE FEASIBILITY
+                  inventory + budget
+                         │
+              ┌──────────┴──────────┐
+              │                     │
+           feasible          constraint conflict
+              │                     │
+              │               recovery levers
+              │          price / quantity / timing /
+              │                 substitution
+              │                     │
+              └──────────┬──────────┘
+                         ▼
+                CANDIDATE GENERATION
+                         │
+                         ▼
+                  MONTE CARLO
+                  EVALUATION
+                         │
+                         ▼
+                     P05 GATE
+                 downside protection
+                         │
+                         ▼
+                  P05 SURVIVORS
+                         │
+                         ▼
+                  ML SLA-RISK GATE
+                  second safety layer
+                         │
+                         ▼
+                  SAFE SURVIVORS
+                         │
+                         ▼
+                FINAL DECISION LOGIC
+                         │
+              ┌──────────┼──────────┐
+              ▼          ▼          ▼
+           ACCEPT    NEGOTIATE    REJECT
+                         │
+                         ▼
+                 PAYMENT BOUNDARY
 ```
 
-The deterministic P05 engine remains the transaction-selection authority. The ML layer is an experimental second safety signal, not the final decision maker.
+## Why two safety gates?
 
-## Live Decision Room
+The two gates solve different problems.
 
-The dashboard now includes a **Live Decision Room** so a judge can enter a fresh demand instead of only replaying persisted examples.
+### P05 — economic downside protection
 
-The user enters:
+MIRROR uses Monte Carlo evaluation to model uncertain outcomes. The P05 gate filters candidates whose downside is unacceptable under the decision rule.
 
-- product / SKU
-- quantity
-- budget
-- deadline
-- price flexibility
-- quantity flexibility
-- timing flexibility
-- substitution tolerance
+### ML — SLA-risk protection
 
-MIRROR then runs the **actual existing decision engine**: baseline evaluation, candidate generation, Monte Carlo evaluation, P05 filtering and final selection. The UI returns:
+The learned model predicts the probability of an SLA miss for the **exact live candidate**. A live candidate must pass the deterministic P05 gate **and** the ML safety gate to remain eligible.
 
-- ACCEPT / NEGOTIATE / REJECT
-- candidates evaluated
-- P05 rejections
-- safe survivors
-- selected transaction, when one exists
-- top safe alternatives
-- a field-backed explanation of why the decision won
+The ML layer does **not** generate transactions and does not replace the deterministic engine. It is a **learned safety veto** that adds service-risk information to an otherwise deterministic decision process.
 
-This is deliberately **not an LLM chatbot**. The live request is not appended to the 500-request benchmark and is not presented as production traffic. It evaluates against the locked merchant/catalog state.
+This makes the architecture explainable: economic and constraint logic remain deterministic, while ML contributes a separate risk signal.
 
-Implementation details are documented in `docs/LIVE_DECISION_ROOM.md`.
+---
 
-## Decision states
+# Live Decision Room
 
-| Decision | Meaning |
+The Live Decision Room lets a judge create a fresh transaction and see the complete evaluation instead of replaying only fixed examples.
+
+### Inputs
+
+| Input | Purpose |
 | --- | --- |
-| **ACCEPT** | The baseline remains the safest selected transaction. |
-| **NEGOTIATE** | A risk-gate-passing alternative beats the baseline under the decision rule. |
-| **REJECT** | No candidate satisfies the persisted decision rule; MIRROR recommends no safe deal. |
+| SKU | Requested product |
+| Quantity | Requested units |
+| Budget | Buyer spending ceiling |
+| Deadline | Required delivery window |
+| Price flexibility | Allowed price movement |
+| Quantity flexibility | Allowed quantity movement |
+| Timing flexibility | Allowed delivery movement |
+| Substitution | Whether alternative SKUs may be considered |
 
-## Locked experiment evidence
+### Live output
 
-The dashboard is backed by deterministic persisted experiment records rather than live/randomly changing benchmark numbers.
+MIRROR exposes the reasoning behind the result, including:
 
-- **500** persisted buyer requests across five deterministic seeds
-- **4,108** total candidates evaluated
-- **3,698** negotiation/alternative candidates enter the P05 aggregate
-- **2,477** fail the P05 risk gate
-- **1,221** survive the P05 gate
-- **390 ACCEPT**, **55 NEGOTIATE**, **55 REJECT**
-- **35 / 45** constraint-conflict requests rescued (**77.78%**)
+- Final decision
+- Selected SKU and quantity
+- Unit price / transaction economics
+- Expected net contribution
+- P05 downside value
+- Candidates evaluated
+- P05 rejections
+- ML evaluations and ML rejections
+- Safe survivors
+- Competitive alternatives
+- Decision explanation
+- ML SLA-miss probability and threshold where applicable
 
-The five-seed headline is **mean uplift versus the persisted baseline reference**. It is not guaranteed profit or production ROI.
+Fresh requests are evaluated against the locked merchant/catalog state. They are **not appended to the persisted 500-request benchmark** and are not presented as production traffic.
 
-## Dashboard evidence
+---
 
-### Persisted request + decision pipeline
+# A critical design rule: more budget ≠ automatic substitution
 
-The dashboard shows the persisted buyer request, baseline, candidate evaluation, constraint check, P05 gate, survivors and selected decision.
+MIRROR explicitly protects the buyer's requested product when the baseline is already feasible.
 
-### Experimental ML safety gate
-
-Persisted ML evidence:
-
-- model: `sla-logreg-v1-seed-20260825`
-- 20,000 held-out synthetic rows
-- precision: **65.64%**
-- recall: **99.90%**
-- F1: **79.23%**
-- end-to-end impact: **2 / 500 decisions changed (0.4%)**
-- expected contribution change: **-0.84%**
-- P05 change: **-0.59%**
-
-The ML experiment therefore does **not** claim a profit increase. Its demonstrated role is additional SLA-risk filtering evidence.
-
-### ML demo cases
-
-1. **Risk caught:** an existing NEGOTIATE decision is rejected by the experimental ML safety check when predicted SLA-miss risk is high.
-2. **Safer alternative:** an existing substitution is replaced by a price alternative after the ML check. Both old and new expected contribution are shown because the safer outcome can trade value for safety.
-
-### Performance vs Baseline
-
-Reports mean uplift across the five deterministic seeds and explicitly avoids presenting it as guaranteed profit.
-
-### Constraint Recovery
-
-Locked evidence: **35 recovered out of 45 constraint-conflict requests = 77.78% rescue rate.**
-
-### P05 Risk Protection
-
-The aggregate story is:
+A huge budget should not cause the system to replace the requested SKU merely because another candidate happens to score slightly higher.
 
 ```text
-ALTERNATIVES → P05 GATE → SAFE SURVIVORS → SELECTED
+Baseline feasible?
+       │
+      YES
+       │
+       ▼
+Keep requested SKU as the reference
+       │
+       ▼
+Only negotiate when another candidate
+clears the safety gates and the strict
+improvement threshold.
 ```
 
-The dashboard shows **2,477 P05 failures** and **1,221 survivors** among the 3,698 negotiation candidates in the aggregate.
+When the baseline is infeasible, recovery levers such as quantity, timing, price, or substitution can become legitimate paths to a safe transaction.
 
-### Negotiation Levers
+This rule prevents the nonsensical outcome of:
 
-Selected-lever evidence:
+> “You increased the budget, so we replaced the product you asked for.”
 
-- Substitution: **39 (70.9%)**
-- Quantity: **15 (27.3%)**
-- Timing: **1 (1.8%)**
-- Price: **0 (0.0%)**
+---
 
-This is descriptive of the persisted evidence set, not a universal rule.
+# Monte Carlo reasoning
 
-### Request Explorer
+MIRROR does not assume that an uncertain transaction has one guaranteed outcome.
 
-The persisted request ledger lets a judge inspect individual **ACCEPT, NEGOTIATE and REJECT** cases instead of seeing only aggregate metrics.
+Conceptually:
 
-### Execution Boundary
+```text
+Candidate
+   ↓
+Sample uncertain outcomes
+   ↓
+Repeat simulations
+   ↓
+Outcome distribution
+   ↓
+Expected value + downside estimate
+   ↓
+P05 gate
+```
 
-Razorpay is deliberately separated from the decision engine. MIRROR can recommend a transaction without pretending that payment happened. Test credentials are required for checkout and payment signatures are verified server-side.
+**Expected net** describes the candidate's average economic outcome.
 
-## Architecture
+**P05** provides a downside-oriented view of the simulated distribution.
+
+That distinction matters because a transaction can look attractive on average while still exposing the merchant to an unacceptable downside tail.
+
+---
+
+# Experimental ML safety layer
+
+MIRROR includes a learned SLA-risk model as a second line of defence.
+
+### Model
+
+- Model: `sla-logreg-v1-seed-20260825`
+- Type: Regularized Logistic Regression
+- Target: SLA-miss probability
+- Evaluation: SKU-held-out synthetic evaluation
+- Held-out rows: **20,000**
+- Safety threshold: **0.35**
+
+### Persisted evaluation
+
+| Metric | Result |
+| --- | ---: |
+| Precision | **65.64%** |
+| Recall | **99.90%** |
+| F1 | **79.23%** |
+| Brier score | **0.052** |
+| ECE | **12.66%** |
+| Risk separation | **8.19×** |
+
+The high recall is useful for a safety layer whose primary purpose is to catch risky cases.
+
+### End-to-end experiment
+
+- **2 / 500** decisions changed
+- End-to-end change: **0.4%**
+- Expected contribution change: **-0.84%**
+- P05 change: **-0.59%**
+- Extra ML rejects: **36**
+
+These are experimental results on synthetic data, **not claims of production ROI**.
+
+### Demonstration cases
+
+**Risk caught:** an existing NEGOTIATE outcome is blocked when the predicted SLA-miss risk is high.
+
+**Safer alternative:** an existing substitution is replaced by a price alternative after the ML safety check, with the old and new expected values exposed so the safety/value trade-off is visible.
+
+---
+
+# Locked benchmark evidence
+
+The dashboard is backed by persisted deterministic experiment records.
+
+- **500** persisted buyer requests
+- Five deterministic seeds
+- **4,108** total candidates evaluated
+- **3,698** negotiation/alternative candidates entering the P05 aggregate
+- **2,477** P05 failures
+- **1,221** P05 survivors
+- **390 ACCEPT**
+- **55 NEGOTIATE**
+- **55 REJECT**
+- **35 / 45** constraint-conflict requests recovered
+- **77.78%** constraint recovery rate
+
+These figures describe the locked synthetic MIRROR experiment and are not guaranteed production performance.
+
+---
+
+# Negotiation intelligence
+
+Negotiation is not limited to price reduction. MIRROR can use different recovery levers depending on the constraint conflict.
+
+Persisted selected-lever evidence:
+
+| Lever | Count | Share |
+| --- | ---: | ---: |
+| Substitution | 39 | 70.9% |
+| Quantity | 15 | 27.3% |
+| Timing | 1 | 1.8% |
+| Price | 0 | 0.0% |
+
+These numbers describe the persisted evidence set, not a universal marketplace rule.
+
+---
+
+# Decision states
+
+### ACCEPT
+
+The requested transaction is feasible and remains the safest selected outcome. MIRROR does not force negotiation simply because alternatives exist.
+
+### NEGOTIATE
+
+The baseline is infeasible or a better candidate satisfies MIRROR's strict decision rule. The selected recovery path must survive the relevant safety gates.
+
+### REJECT
+
+No acceptable safe transaction remains under the configured decision rules.
+
+---
+
+# Constraint recovery
+
+A failed request does not automatically mean rejection.
+
+```text
+REQUEST
+   │
+   ├── price adjustment
+   ├── quantity adjustment
+   ├── timing adjustment
+   └── SKU substitution
+           │
+           ▼
+      candidate evaluation
+           │
+           ▼
+      Monte Carlo + P05
+           │
+           ▼
+        ML safety
+           │
+           ▼
+       safe recovery
+```
+
+The locked experiment recovered **35 of 45** constraint-conflict requests, producing a **77.78%** rescue rate.
+
+---
+
+# Request Explorer
+
+The dashboard includes a persisted request ledger so reviewers can inspect individual ACCEPT, NEGOTIATE, and REJECT cases rather than seeing only aggregate statistics.
+
+This turns the demo into an evidence-driven journey through the system instead of a single polished result.
+
+---
+
+# Performance vs baseline
+
+The dashboard reports mean uplift across five deterministic seeds against the persisted baseline reference.
+
+MIRROR intentionally does not describe this as guaranteed profit or production ROI. The benchmark is synthetic and deterministic so the experiment can be reproduced consistently.
+
+---
+
+# Payment boundary
+
+MIRROR separates **decision** from **payment execution**.
+
+A recommendation is not presented as a completed financial transaction.
+
+When checkout is demonstrated, Razorpay test credentials are used and payment signatures are verified server-side.
+
+---
+
+# Architecture
 
 ```text
                          BUYER REQUEST
                               │
                               ▼
-                     DETERMINISTIC ENGINE
-                              │
-                ┌─────────────┴─────────────┐
-                │                           │
-          candidate search            constraint check
-                │                           │
-                └─────────────┬─────────────┘
-                              ▼
-                         MONTE CARLO
-                              ▼
-                           P05 GATE
-                              ▼
-                       SAFE SURVIVORS
-                              ▼
-                    FINAL DECISION AUTHORITY
-                              │
-               ┌──────────────┼──────────────┐
-               ▼              ▼              ▼
-            ACCEPT        NEGOTIATE        REJECT
-                              │
-                              ▼
-                       PAYMENT BOUNDARY
-
-             EXPERIMENTAL ML SAFETY SIGNAL
-                       ───────────────►
-                 evidence / extra filter
-                 NOT the final authority
+                  ┌──────────────────────┐
+                  │ DETERMINISTIC ENGINE │
+                  └──────────┬───────────┘
+                             │
+                 ┌───────────┴───────────┐
+                 │                       │
+                 ▼                       ▼
+          Candidate search       Constraint check
+                 │                       │
+                 └───────────┬───────────┘
+                             ▼
+                      MONTE CARLO
+                             │
+                             ▼
+                         P05 GATE
+                             │
+                             ▼
+                     P05 SURVIVORS
+                             │
+                             ▼
+                       ML SLA GATE
+                             │
+                             ▼
+                      SAFE SURVIVORS
+                             │
+                             ▼
+                   FINAL DECISION LOGIC
+                             │
+                  ┌──────────┼──────────┐
+                  ▼          ▼          ▼
+               ACCEPT    NEGOTIATE    REJECT
+                             │
+                             ▼
+                     PAYMENT BOUNDARY
 ```
 
-The live API is exposed by `backend.ai_app:app`. It imports the existing deterministic application and adds `/ai/live-decision`; it does not replace the decision engine.
+### Responsibility split
 
-## Project structure
+| Layer | Responsibility |
+| --- | --- |
+| Deterministic engine | Economic logic, constraints, candidate evaluation and transaction selection |
+| Monte Carlo | Uncertainty simulation |
+| P05 gate | Downside-risk filtering |
+| ML layer | SLA-miss probability and second safety veto |
+| Frontend | Interactive decision room, evidence and visual explanation |
+| Payment boundary | Optional transaction execution after recommendation |
+
+---
+
+# Project structure
 
 ```text
 MIRROR/
@@ -195,8 +416,10 @@ MIRROR/
 │   ├── test_decision_engine.py
 │   ├── test_risk_model.py
 │   └── test_live_decision.py
+│
 ├── data/
 ├── experiments/
+│
 ├── frontened/
 │   ├── index.html
 │   ├── app.js
@@ -206,56 +429,153 @@ MIRROR/
 │   ├── intelligence-core.js
 │   ├── decision-pipeline.js
 │   └── assets/
+│
 ├── docs/
 │   ├── FINAL_DEMO_QA.md
 │   └── LIVE_DECISION_ROOM.md
+│
 ├── render.yaml
+├── requirements.txt
 └── README.md
 ```
 
-## Run locally
+---
 
-### Existing dashboard
+# Tech stack
+
+### Backend
+
+- Python
+- FastAPI
+- Uvicorn
+- NumPy
+- Pandas
+
+### Decision & intelligence
+
+- Deterministic decision rules
+- Monte Carlo simulation
+- P05 downside-risk filtering
+- Regularized Logistic Regression
+- Feature-based SLA-risk prediction
+
+### Frontend
+
+- HTML
+- CSS
+- JavaScript
+- Interactive Live Decision Room
+- Cinematic, section-based visual storytelling
+
+### Deployment
+
+- Render
+- ASGI entrypoint: `backend.ai_app:app`
+
+### Payments
+
+- Razorpay test environment
+
+---
+
+# API
+
+The live application is served through `backend.ai_app:app`.
+
+Important endpoints:
+
+```text
+GET  /ai/risk/model
+POST /ai/risk/predict
+POST /ai/live-decision
+```
+
+`/ai/live-decision` combines the deterministic MIRROR pipeline with the live ML SLA-risk safety gate. The persisted 500-request experiment remains separate.
+
+---
+
+# Run locally
+
+Create and activate a virtual environment:
 
 ```powershell
 python -m venv venv
-.\\venv\\Scripts\\Activate.ps1
+.\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-For the full dashboard, use the live ASGI entrypoint so the Live Decision Room is registered too:
+Start the complete application:
 
 ```powershell
 uvicorn backend.ai_app:app --host 0.0.0.0 --port 8002
 ```
 
-Then open:
+Open:
 
 ```text
 http://127.0.0.1:8002/
 ```
 
-The backend also exposes `/health` and `/ai/risk/health`.
+Use `backend.ai_app:app`, not only `backend.main:app`, when you need the Live Decision Room and ML safety endpoints.
 
-## Render deployment
+---
 
-Render must start the **AI/live entrypoint**, not only `backend.main:app`:
+# Render deployment
+
+The repository's Render configuration uses:
 
 ```text
 uvicorn backend.ai_app:app --host 0.0.0.0 --port $PORT
 ```
 
-The repository includes `render.yaml` with this configuration and uses `/ai/risk/health` as the health-check contract so a deployment running only `backend.main:app` cannot be considered healthy by the Blueprint configuration.
+with:
 
-**Important for the current existing Render service:** if its Start Command is still configured manually as `uvicorn backend.main:app ...`, change that Start Command to the command above and redeploy. The repository file alone does not retroactively change a manually configured service unless the service is managed/synced through the Blueprint.
+```text
+/ai/risk/health
+```
 
-## Payment configuration
+as the health-check path.
 
-Set Razorpay test credentials on the server when payment testing is required:
+If a manually configured Render service still starts `backend.main:app`, switch it to the AI/live entrypoint before redeploying.
+
+---
+
+# Payment configuration
+
+For payment testing, configure server-side Razorpay test credentials:
 
 ```text
 RAZORPAY_KEY_ID=...
 RAZORPAY_KEY_SECRET=...
 ```
 
-Never commit credentials.
+Never commit credentials to the repository.
+
+---
+
+# Evidence & limitations
+
+MIRROR is deliberately transparent about what its numbers mean.
+
+- The benchmark uses synthetic MIRROR demand scenarios.
+- The persisted experiment is deterministic and reproducible.
+- The ML evaluation uses SKU-held-out synthetic data.
+- The ML layer is a safety signal, not proof of real-world production performance.
+- The five-seed performance result is not a guarantee of future profit.
+- A recommendation is not the same as a completed payment.
+
+The purpose of the project is to demonstrate **decision quality, risk awareness, explainability, and system architecture** without hiding uncertainty behind impressive-looking numbers.
+
+---
+
+# The idea in one sentence
+
+> **MIRROR does not search for the deal that looks best — it searches for the deal that remains safe after uncertainty, downside risk, and SLA risk are taken into account.**
+
+---
+
+## Project status
+
+**MIRROR — final interactive decision-engine demo**
+
+The repository contains the deterministic decision engine, Monte Carlo evaluation, P05 downside gate, live ML SLA-risk safety layer, interactive decision room, persisted benchmark evidence, request exploration, and payment boundary for the end-to-end demonstration.
