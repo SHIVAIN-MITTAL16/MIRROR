@@ -3,7 +3,7 @@
 ## 2026-08-26 — ML evidence integration
 
 ### Step completed
-Integrated the completed SLA-risk benchmark into the existing MIRROR visual system without modifying the deterministic decision engine, persisted seed artifacts, or Razorpay flow.
+Integrated the SLA-risk benchmark into the former merchant experiment interface without modifying the deterministic decision engine or persisted seed artifacts. Buyer checkout is handled by the Purchase Passport PayPal sandbox flow.
 
 ### Repository changes
 - `frontened/ml-risk.js` — experimental ML evidence section and replay controls.
@@ -50,4 +50,4 @@ Integrated the completed SLA-risk benchmark into the existing MIRROR visual syst
 - Confirm ACCEPT / NEGOTIATE / REJECT real requests.
 - Confirm zero console errors.
 - Confirm zero failed API requests attributable to the redesign.
-- Confirm Razorpay remains truthful/test-mode or disabled.
+- Confirm Passport PayPal checkout remains truthful, sandbox-only, and gated by an APPROVE decision.

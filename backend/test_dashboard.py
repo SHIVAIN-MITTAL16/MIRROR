@@ -1,10 +1,9 @@
-import os
 import unittest
 from math import isfinite
 
 from fastapi.testclient import TestClient
 
-from backend.main import APP, PAYMENT_ORDERS, candidate_amount_paise, load_dashboard_artifacts
+from backend.main import APP, load_dashboard_artifacts
 
 
 class MerchantDashboardTests(unittest.TestCase):
@@ -53,52 +52,9 @@ class MerchantDashboardTests(unittest.TestCase):
 
 		assert_json_finite(payload)
 
-	def test_selected_candidate_and_amount_are_persisted(self):
-		for (seed, request_id), record in self.artifacts["requests"].items():
-			if record["decision"] == "NEGOTIATE":
-				candidate = record["best_candidate"]
-				self.assertIn(candidate, record["candidates"])
-				self.assertEqual(candidate_amount_paise(candidate), round(candidate["candidate_price"] * candidate["quantity"] * 100))
-				return
-		self.fail("Expected at least one persisted negotiated request")
-
-	def test_payment_boundary_is_disabled_without_credentials(self):
-		old_id, old_secret = os.environ.pop("RAZORPAY_KEY_ID", None), os.environ.pop("RAZORPAY_KEY_SECRET", None)
-		try:
-			response = self.client.post("/payments/create-order", json={"seed": 20260821, "request_id": 1})
-			self.assertEqual(response.status_code, 503)
-			self.assertNotIn("key_secret", response.text)
-			invalid = self.client.post("/payments/verify", json={"razorpay_order_id": "nope", "razorpay_payment_id": "pay", "razorpay_signature": "bad"})
-			self.assertEqual(invalid.status_code, 503)
-		finally:
-			if old_id is not None:
-				os.environ["RAZORPAY_KEY_ID"] = old_id
-			if old_secret is not None:
-				os.environ["RAZORPAY_KEY_SECRET"] = old_secret
-
-	def test_non_selected_candidate_cannot_create_order_and_invalid_signature_is_rejected(self):
-		old_id, old_secret = os.environ.get("RAZORPAY_KEY_ID"), os.environ.get("RAZORPAY_KEY_SECRET")
-		os.environ["RAZORPAY_KEY_ID"] = "rzp_test_dashboard"
-		os.environ["RAZORPAY_KEY_SECRET"] = "test_secret"
-		try:
-			response = self.client.post("/payments/create-order", json={"seed": 20260821, "request_id": 1})
-			self.assertEqual(response.status_code, 409)
-			PAYMENT_ORDERS["order_test"] = {"verified": False, "payment_id": None}
-			response = self.client.post("/payments/verify", json={
-				"razorpay_order_id": "order_test", "razorpay_payment_id": "pay_test",
-				"razorpay_signature": "invalid",
-			})
-			self.assertEqual(response.status_code, 400)
-		finally:
-			PAYMENT_ORDERS.pop("order_test", None)
-			if old_id is None:
-				os.environ.pop("RAZORPAY_KEY_ID", None)
-			else:
-				os.environ["RAZORPAY_KEY_ID"] = old_id
-			if old_secret is None:
-				os.environ.pop("RAZORPAY_KEY_SECRET", None)
-			else:
-				os.environ["RAZORPAY_KEY_SECRET"] = old_secret
+	def test_experimental_merchant_ledger_is_not_a_payment_surface(self):
+		self.assertEqual(self.client.post("/payments/create-order", json={}).status_code, 404)
+		self.assertEqual(self.client.post("/payments/verify", json={}).status_code, 404)
 
 
 if __name__ == "__main__":

@@ -95,7 +95,7 @@ This case is useful because the ML layer sacrifices expected contribution while 
 - Negotiation levers: substitution, quantity and timing.
 - Explainable request/candidate/decision pipeline.
 - Persisted 500-request explorer.
-- Truthful Razorpay execution boundary.
+- Truthful PayPal sandbox execution boundary for Passport purchases.
 
 ## 6. Validation / QA checkpoint
 
@@ -134,5 +134,5 @@ The demo should explicitly show:
 6. The aggregate 500-request evidence.
 7. Five-seed stability.
 8. The ML tradeoff and negative contribution result.
-9. The Razorpay boundary without fake payment success.
+9. The PayPal sandbox boundary without fake payment success.
 10. Limitations and remaining roadmap.

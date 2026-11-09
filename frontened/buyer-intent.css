@@ -1,0 +1,45 @@
+.buyer-intent-section{align-items:stretch;justify-content:center;gap:24px;background:radial-gradient(680px circle at 82% 26%,rgba(34,211,238,.08),transparent 64%)}
+.buyer-intent-header{max-width:850px}
+.buyer-intent-header .title{margin-bottom:12px}
+.buyer-intent-layout{display:grid;grid-template-columns:minmax(260px,.72fr) minmax(0,1.28fr);gap:20px;align-items:start}
+.buyer-intent-form,.buyer-intent-review{padding:clamp(20px,3vw,32px)}
+.buyer-intent-form label,.buyer-condition-fields label{display:grid;gap:8px;color:var(--cin-muted);font-size:12px;line-height:1.4}
+.buyer-intent-form textarea,.buyer-intent-form input,.buyer-condition-fields input,.buyer-condition-fields select{width:100%;min-width:0;border:1px solid var(--cin-line);border-radius:8px;padding:12px;background:rgba(1,10,20,.76);color:var(--cin-ink)}
+.buyer-intent-form textarea{resize:vertical;min-height:150px;line-height:1.55}
+.buyer-intent-form input::placeholder,.buyer-condition-fields input::placeholder{color:#7890a4}
+.buyer-intent-currency{margin-top:18px}
+.buyer-intent-form .button,.buyer-intent-review>.button{margin-top:18px}
+.buyer-intent-status{min-height:1.5em;margin:14px 0 0;color:var(--cin-muted);font-size:13px;line-height:1.5}
+.buyer-intent-status[data-kind=error]{color:#ff9baa}
+.buyer-intent-status[data-kind=success]{color:#72f2d3}
+.buyer-intent-status[data-kind=loading]{color:var(--cin-cyan)}
+.buyer-intent-disclosure,.buyer-intent-note{color:var(--cin-muted);font-size:12px;line-height:1.6}
+.buyer-intent-disclosure{margin:20px 0 0;padding-top:16px;border-top:1px solid var(--cin-line)}
+.buyer-intent-review{min-width:0}
+.buyer-review-state{display:inline-block;margin:0 0 18px;padding:8px 11px;border:1px solid rgba(72,231,255,.28);color:var(--cin-cyan);font:700 10px/1.4 var(--mono);letter-spacing:.09em}
+.buyer-intent-review h3,.buyer-intent-result h3{margin:0 0 12px;font-size:clamp(22px,2.5vw,32px);letter-spacing:-.035em}
+.buyer-condition-list{display:grid;gap:14px}
+.buyer-condition{min-width:0;padding:20px}
+.buyer-condition h4{margin:0 0 15px;font-size:14px;color:var(--cin-cyan)}
+.buyer-condition-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}
+.buyer-condition-fields select{text-transform:capitalize}
+.buyer-condition-strength{display:grid;gap:10px;min-width:0;margin:0;padding:12px;border:1px solid var(--cin-line);border-radius:8px}
+.buyer-condition-strength legend{padding:0 5px;color:var(--cin-muted);font-size:12px}
+.buyer-condition-strength label{display:flex;align-items:center;gap:9px;cursor:pointer}
+.buyer-condition-strength input{flex:0 0 auto;width:18px;height:18px;margin:0;accent-color:var(--cin-cyan)}
+.buyer-condition-quote{margin:17px 0 4px;padding:12px 14px;border-left:2px solid var(--cin-cyan);background:rgba(72,231,255,.045);color:var(--cin-ink);font-size:14px;line-height:1.5;overflow-wrap:anywhere}
+.buyer-condition>span{color:var(--cin-muted);font-size:10px}
+.buyer-reviewed-check,.buyer-intent-ack{display:flex;align-items:flex-start;gap:10px;margin-top:17px;color:var(--cin-muted);font-size:12px;line-height:1.5;cursor:pointer}
+.buyer-reviewed-check input,.buyer-intent-ack input{flex:0 0 auto;width:18px;height:18px;margin:0;accent-color:var(--cin-cyan)}
+.buyer-intent-clarifications{margin-top:22px;padding:16px;border:1px solid rgba(255,181,71,.32);background:rgba(255,181,71,.045)}
+.buyer-intent-clarifications h4{margin:0 0 8px;color:#ffd28a;font-size:13px}
+.buyer-intent-clarifications ul{margin:0;padding-left:20px;color:var(--cin-muted);font-size:13px;line-height:1.65}
+.buyer-intent-blocked-note{margin:12px 0 0;color:#ffd28a;font-size:12px;line-height:1.55}
+.buyer-intent-result{margin-top:18px;padding:18px;border:1px solid var(--cin-line);border-radius:12px;line-height:1.55;overflow-wrap:anywhere}
+.buyer-intent-success{border-color:rgba(53,224,181,.4);background:rgba(53,224,181,.05)}
+.buyer-intent-success h3{color:var(--accept)}
+.buyer-intent-error{border-color:rgba(255,77,109,.4);color:#ff9baa}
+.buyer-intent-identity{margin:16px 0 0;padding:14px;border:1px solid rgba(255,255,255,.12);color:var(--cin-muted);font-size:12px;line-height:1.55}
+.buyer-intent-section [hidden]{display:none!important}
+@media(max-width:850px){.buyer-intent-layout{grid-template-columns:1fr}.buyer-intent-section{min-height:auto!important}}
+@media(max-width:520px){.buyer-condition-fields{grid-template-columns:1fr}.buyer-condition{padding:16px}.buyer-intent-form,.buyer-intent-review{padding:18px}}

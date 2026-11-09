@@ -1,5 +1,6 @@
-import { renderIntelligenceCore } from '/ui/intelligence-core.js';
-import { replayPipeline } from '/ui/decision-pipeline.js';
+import { renderIntelligenceCore } from './intelligence-core.js';
+import { replayPipeline } from './decision-pipeline.js';
+import { apiUrl } from './api-config.js';
 
 const intro = document.querySelector('#cinematic-intro');
 const introVideo = document.querySelector('#intro-video');
@@ -31,14 +32,14 @@ if (intro && introVideo) {
 
 const freshOverrides = document.createElement('link');
 freshOverrides.rel = 'stylesheet';
-freshOverrides.href = '/ui/core-overrides.css?qa=metrics';
+freshOverrides.href = './core-overrides.css?qa=metrics';
 document.head.append(freshOverrides);
 
 const $ = selector => document.querySelector(selector);
 const money = value => '₹' + new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(value ?? 0);
 const pct = value => (value * 100).toFixed(2) + '%';
 const pct1 = value => (value * 100).toFixed(1) + '%';
-const get = async url => { const response = await fetch(url); if (!response.ok) throw Error(await response.text()); return response.json(); };
+const get = async url => { const response = await fetch(apiUrl(url)); if (!response.ok) throw Error(await response.text()); return response.json(); };
 const state = { rows: [], cancel: null, defaultRow: null, selectedKey: null, skus: [] };
 const outcomeClass = value => value === 'NEGOTIATE' ? 'negotiate' : value === 'ACCEPT' ? 'accept' : 'reject';
 
@@ -78,12 +79,6 @@ function setTransaction(detail) {
   $('#transaction').innerHTML = '<p class="eyebrow">MIRROR RECOMMENDS</p><div class="decision-badge ' + outcomeClass(result.decision) + '">' + badge + '</div><h2 class="title">' + title + '</h2><div class="transaction-grid">' + values.map(value => '<div>' + value[0] + '<b class="data">' + value[1] + '</b></div>').join('') + '</div><p class="copy">' + (noDeal ? 'No-Deal is the deliberate reference: expected contribution ₹0 · P05 ₹0.' : 'Selected from the persisted candidates after the P05 downside gate.') + '</p>';
 }
 
-function setPayment(detail) {
-  $('#payment').innerHTML = detail.payment.razorpay_test_mode === 'CONFIGURED'
-    ? '<p class="eyebrow">Ready to transact</p><strong>Razorpay Test Mode</strong><p class="copy">A selected payable transaction may proceed to checkout.</p><button class="button">Execute Test Transaction</button>'
-    : '<p class="eyebrow">Execution disabled</p><strong>RAZORPAY TEST MODE NOT CONFIGURED</strong><p class="copy">Connect Razorpay test credentials to execute. MIRROR experiment results remain real persisted data.</p><button class="button" disabled>Execute Test Transaction</button>';
-}
-
 function renderStage(detail) { renderIntelligenceCore($('#pipeline-core'), detail, 'pipeline'); }
 
 async function select(seed, requestId) {
@@ -100,7 +95,6 @@ async function select(seed, requestId) {
   state.cancel = replayPipeline($('#pipeline-stages'), detail.decision, phase => renderStage(detail, phase), () => renderStage(detail, 6));
   $('#explain').innerHTML = detail.explanation.map(item => '<li>' + item + '</li>').join('');
   setTransaction(detail);
-  setPayment(detail);
   populateExplorer();
 }
 
@@ -186,7 +180,7 @@ async function runLiveDecision() {
       timing_flexibility: $('#live-timing-flex').value,
       substitution_tolerance: Number($('#live-substitution').value),
     };
-    const response = await fetch('/ai/live-decision', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  const response = await fetch(apiUrl('/ai/live-decision'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     if (!response.ok) throw Error(await response.text());
     renderLiveResult(await response.json());
     status.textContent = 'Decision complete. MIRROR used Monte Carlo + P05 first, then the live ML SLA-risk gate on the surviving candidates.';
@@ -218,7 +212,7 @@ async function boot() {
   populateExplorer();
   setupLiveRoom(skus);
   $('#load').onclick = () => select($('#seed').value, $('#request-id').value);
-  $('#analyze').onclick = () => { select(state.defaultRow.seed, state.defaultRow.request_id); $('#request').scrollIntoView(); };
+  $('#analyze').onclick = () => document.querySelector('#buyer-intent')?.scrollIntoView({ behavior: 'smooth' });
   $('#decision-filter').onchange = populateExplorer;
   $('#class-filter').onchange = populateExplorer;
   $('#clear-filters').onclick = () => { $('#decision-filter').value = 'ALL'; $('#class-filter').value = 'ALL'; populateExplorer(); };

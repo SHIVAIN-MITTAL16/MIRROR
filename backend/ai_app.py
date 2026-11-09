@@ -32,6 +32,8 @@ from backend.main import (
     score_candidate,
 )
 from backend.risk_model import get_risk_model, risk_features_for_request
+from backend.paypal import router as passport_paypal_router
+from backend.product_discovery import router as product_discovery_router
 
 
 class RiskPredictionRequest(BaseModel):
@@ -445,3 +447,5 @@ def risk_health():
 
 
 app = APP
+APP.include_router(passport_paypal_router)
+APP.include_router(product_discovery_router)

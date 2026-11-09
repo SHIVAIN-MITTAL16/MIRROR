@@ -1,7 +1,37 @@
 services:
   - type: web
-    name: mirror
+    name: mirror-api
     runtime: python
+    plan: starter
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn backend.ai_app:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /ai/risk/health
+    healthCheckPath: /health
+    disk:
+      name: mirror-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: MIRROR_DATABASE_PATH
+        value: /var/data/mirror.sqlite3
+      - key: MIRROR_CORS_ORIGINS
+        value: https://mirror-ui.onrender.com
+      - key: PAYPAL_BASE_URL
+        value: https://api-m.sandbox.paypal.com
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: CHANNEL3_API_KEY
+        sync: false
+  - type: web
+    name: mirror-ui
+    runtime: static
+    buildCommand: python scripts/build_frontend.py
+    staticPublishPath: ./build/frontend
+    envVars:
+      - key: MIRROR_API_BASE_URL
+        value: https://mirror-api.onrender.com

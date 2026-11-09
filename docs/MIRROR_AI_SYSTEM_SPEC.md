@@ -22,7 +22,7 @@ The existing system is the foundation:
 - risk-gate decisions
 - persisted request explorer
 - FastAPI APIs
-- Razorpay test-mode execution boundary
+- PayPal sandbox execution boundary for buyer Purchase Passports
 - explainable visual decision pipeline
 
 The next build adds the missing AI and safety layers:
@@ -61,7 +61,7 @@ The AI may reason, plan and explain. It may **not invent financial facts**. Numb
 - Cinematic introduction and MIRROR vessel visual system.
 - Responsive dashboard.
 - Intro replay persistence.
-- Razorpay test-mode boundary with server-side order/payment handling.
+- PayPal sandbox boundary with server-side order and capture handling.
 
 ### Evidence principle
 
@@ -142,7 +142,7 @@ MIRROR should not be a chatbot wrapped around a dashboard. The LLM is one compon
                        HOLD/HUMAN  EXECUTION
                                       │
                                       ▼
-                              RAZORPAY TEST MODE
+                              PAYPAL SANDBOX MODE
                                       │
                                       ▼
                                OBSERVED OUTCOME
@@ -439,7 +439,7 @@ This document is the **canonical direction**. Other docs should describe impleme
 | Monte Carlo simulation | DONE |
 | P05 risk gate | DONE |
 | Explainable pipeline | DONE |
-| Razorpay execution boundary | DONE |
+| PayPal Passport execution boundary | IMPLEMENTED; mock-tested, sandbox capture not yet demonstrated |
 | Real predictive ML | NEXT |
 | Held-out evaluation | NEXT |
 | Tool-using AI agent | NEXT |
@@ -510,7 +510,7 @@ Add scenario laboratory, audit/replay, counterfactuals, and recovery metrics.
 
 ### Phase 7 — Execution
 
-Connect the controlled flow to Razorpay test mode, including ambiguous-state handling.
+Connect the buyer Purchase Passport flow to PayPal sandbox, including ambiguous-state handling.
 
 ### Phase 8 — Competition readiness
 
@@ -530,7 +530,7 @@ If any displayed number cannot be traced to data, a model, a simulation, a polic
 
 ## 18. Competition Alignment
 
-The architecture is intentionally designed around the Razorpay Buildathon emphasis on real AI, working products, architecture, measurable outcomes, explainable financial actions, bounded execution, failure handling, and evaluation. The live competition requirements should be rechecked immediately before submission because external requirements can change.
+This historical architecture note describes the earlier merchant experiment. MIRROR's current product direction is buyer-first Purchase Assurance with Gemini restricted to intent extraction and PayPal sandbox payment gating. Hackathon requirements must be checked against the active event brief.
 
 ---
 

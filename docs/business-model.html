@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MIRROR Business Model — Projection</title>
+  <style>
+    :root{color-scheme:dark;--bg:#070b14;--panel:#111c2e;--line:#28384d;--text:#f4f7fb;--muted:#9aabc0;--cyan:#00d4ff}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 75% 0%,#10314b 0,transparent 42%),var(--bg);color:var(--text);font:16px/1.55 system-ui,sans-serif}
+    main{max-width:1100px;margin:auto;padding:clamp(20px,5vw,64px)}h1{font-size:clamp(2rem,5vw,3.5rem);line-height:1.05}h2{margin-top:0}.muted{color:var(--muted)}.label{color:var(--cyan);letter-spacing:.12em;font-weight:700;font-size:.8rem}
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.card{padding:22px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(145deg,rgba(17,28,46,.96),rgba(9,16,28,.96))}.inputs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.inputs label{display:grid;gap:6px;color:var(--muted);font-size:.9rem}.inputs input{min-width:0;padding:11px;border:1px solid #3a4e66;border-radius:9px;background:#091321;color:var(--text);font:inherit}
+    .results{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.result{padding:16px;background:#0a1422;border:1px solid var(--line);border-radius:12px}.result span{display:block;color:var(--muted);font-size:.85rem}.result strong{display:block;margin-top:4px;font-size:1.5rem}.projection{color:#f6c46a;font-weight:700}.wide{grid-column:1/-1}a{color:#9eeeff}
+    @media(max-width:700px){.grid,.inputs,.results{grid-template-columns:1fr}.wide{grid-column:auto}}
+  </style>
+</head>
+<body><main>
+  <p class="label">MIRROR / BUSINESS MODEL</p><h1>Charge for durable value,<br>keep the promise record free.</h1>
+  <p class="muted">An editable monthly projection model. Every value below is an assumption, not actual revenue, customer data, or a validated forecast.</p>
+  <div class="grid">
+    <section class="card"><h2>Editable assumptions</h2><div class="inputs">
+      <label>Monthly active buyers<input id="buyers" type="number" min="0" value="10000"></label>
+      <label>Paid plan conversion (%)<input id="conversion" type="number" min="0" max="100" step="0.1" value="5"></label>
+      <label>Monthly paid plan price (USD)<input id="price" type="number" min="0" step="0.01" value="6.99"></label>
+      <label>API and storage cost / active buyer (USD)<input id="api" type="number" min="0" step="0.01" value="0.18"></label>
+      <label>Support and dispute operations / active buyer (USD)<input id="support" type="number" min="0" step="0.01" value="0.35"></label>
+      <label>Fixed infrastructure / month (USD)<input id="infrastructure" type="number" min="0" step="1" value="1200"></label>
+      <label>Disclosed partner revenue / active buyer (USD)<input id="partner" type="number" min="0" step="0.01" value="0"></label>
+    </div><p class="muted">The free buyer Passport and basic promise record stay available without payment. Partner revenue is optional and only valid with clear disclosure; product ranking must not depend on it.</p></section>
+    <section class="card"><h2>Projected monthly output</h2><div class="results">
+      <div class="result"><span>Paid subscribers (projection)</span><strong id="paid">—</strong></div>
+      <div class="result"><span>Subscription revenue (projection)</span><strong id="subscription-revenue">—</strong></div>
+      <div class="result"><span>Disclosed partner revenue (projection)</span><strong id="partner-revenue">—</strong></div>
+      <div class="result"><span>Total monthly revenue (projection)</span><strong id="revenue">—</strong></div>
+      <div class="result"><span>Variable costs (projection)</span><strong id="variable-cost">—</strong></div>
+      <div class="result"><span>Gross profit after variable costs (projection)</span><strong id="gross-profit">—</strong></div>
+      <div class="result"><span>Gross margin (projection)</span><strong id="gross-margin">—</strong></div>
+      <div class="result"><span>Break-even active buyers incl. fixed infra</span><strong id="breakeven">—</strong></div>
+    </div><p class="projection">Projection only — validate costs, willingness to pay and support burden with real cohorts.</p></section>
+    <section class="card wide"><h2>Why this model fits the buyer promise</h2><p>Passport creation and preserving the buyer's original promise record are foundational and remain free. A paid plan could fund longer-term monitoring, searchable purchase history, warranty and return-date reminders, and exportable evidence bundles. Merchant or retailer integrations should improve the buyer's assurance record, never suppress negative comparisons.</p><p>Any referral relationship must be labeled at the product or seller offer and must not affect the deterministic condition comparison or ranking.</p><p>PayPal can benefit when a buyer chooses a familiar checkout after the Passport decision allows it: increased checkout use can support PayPal transaction volume, while the buyer gets a preserved record of the offer and a decision gate before the payment step. MIRROR does not promise a refund or replace PayPal's own dispute processes.</p></section>
+  </div>
+</main><script>
+  const ids=['buyers','conversion','price','api','support','infrastructure','partner'];
+  const fields=Object.fromEntries(ids.map(id=>[id,document.getElementById(id)]));
+  const money=value=>new Intl.NumberFormat(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2}).format(value);
+  function update(){const buyers=Math.max(0,Number(fields.buyers.value)||0),rate=Math.max(0,Math.min(1,(Number(fields.conversion.value)||0)/100)),price=Math.max(0,Number(fields.price.value)||0),api=Math.max(0,Number(fields.api.value)||0),support=Math.max(0,Number(fields.support.value)||0),fixed=Math.max(0,Number(fields.infrastructure.value)||0),partner=Math.max(0,Number(fields.partner.value)||0);const paid=buyers*rate,subscription=paid*price,partnerTotal=buyers*partner,revenue=subscription+partnerTotal,variable=buyers*(api+support),gross=revenue-variable,contribution=rate*price+partner-api-support,breakeven=contribution>0?Math.ceil(fixed/contribution):null;document.getElementById('paid').textContent=Math.round(paid).toLocaleString();document.getElementById('subscription-revenue').textContent=money(subscription);document.getElementById('partner-revenue').textContent=money(partnerTotal);document.getElementById('revenue').textContent=money(revenue);document.getElementById('variable-cost').textContent=money(variable);document.getElementById('gross-profit').textContent=money(gross);document.getElementById('gross-margin').textContent=revenue>0?`${(gross/revenue*100).toFixed(1)}%`:'—';document.getElementById('breakeven').textContent=breakeven===null?'Not reachable under these assumptions':breakeven.toLocaleString();}
+  Object.values(fields).forEach(field=>field.addEventListener('input',update));update();
+</script></body></html>

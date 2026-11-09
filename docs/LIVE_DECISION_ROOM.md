@@ -70,7 +70,7 @@ The room returns:
 
 The live request is evaluated against the locked merchant/catalog state but is **not appended to the persisted 500-request benchmark**. This keeps benchmark evidence deterministic while still allowing an interactive product demonstration.
 
-The live endpoint also does not create a Razorpay payment order. Payment remains a separate execution boundary.
+The experimental live endpoint does not create a Purchase Passport payment order. Payment is available only through the Passport PayPal sandbox routes.
 
 ## Deployment
 

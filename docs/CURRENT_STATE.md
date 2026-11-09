@@ -1,62 +1,38 @@
-# MIRROR — Current State Ledger
+# MIRROR - Current State Ledger
 
-**Last updated:** 26 August 2026  
-**Branch:** `mirror-visual-redesign`
+**Last audited:** 9 November 2026
+**Branch:** `mirror-purchase-assurance`
 
-This file is intentionally blunt. It records what is implemented, what is only designed, and what still needs evidence.
+This file describes the checked local working tree. It is not a deployment or live-provider certification.
 
-## Implemented and evidenced in the repository
+## Implemented in the repository
 
-- Locked 50-SKU demand/inventory dataset with validation.
-- Persisted five-seed experiment artifacts.
-- Monte Carlo candidate evaluation using 10,000 paths.
-- Empirical demand CDFs and P05 downside metric.
-- Candidate search across price, quantity, timing and substitution.
-- ACCEPT / NEGOTIATE / REJECT decision states.
-- Persisted request explorer and dashboard APIs.
-- Razorpay test-mode order/payment boundary.
-- Server-side payment signature verification.
-- Responsive/cinematic frontend and decision visualization.
-- First learned SLA-risk model implemented in `backend/risk_model.py`.
-- AI-facing risk API implemented in `backend/ai_app.py`.
-- Risk-model unit tests added in `backend/test_risk_model.py`.
-- SKU-held-out risk-model benchmark executed and persisted.
-- Threshold sensitivity and scenario-cost analysis executed and persisted.
-- Experimental ML evidence panel added to the dashboard using persisted benchmark evidence.
-- Two replayable ML demonstration cases recorded in the dashboard evidence snapshot.
+- Buyer-intent extraction through Gemini structured output, followed by strict server-side validation and explicit buyer confirmation.
+- Empty, clearly labelled fallback for missing Gemini configuration and transient network/timeouts. It never invents proposals.
+- SQLite Purchase Passports, buyer/merchant condition ownership, evidence provenance, append-only audit tables, and deterministic condition-level evaluation.
+- Seller offer submission and evidence association. Seller-declared uploads remain raw/unverified; no evidence verifier exists.
+- PayPal sandbox Orders API routes, official JavaScript SDK integration, APPROVE gating, server-side amount/currency validation, persisted lifecycle fields, idempotency, and PayPal signature verification for webhook reconciliation.
+- Channel3 search/product-detail adapter. Live access depends on `CHANNEL3_API_KEY`.
+- Product comparison using AG Grid Community loaded from a pinned CDN, with a semantic table fallback if that import fails.
+- Buyer issue-report creation and retrieval. Reports remain `open`; there is no authenticated resolver or resolution-state transition API.
+- Render Blueprint, local launcher, `.env.example`, and importable Postman collection/environment.
+- The old deterministic merchant/inventory and ML experiment remains available as an explicitly experimental surface; it is not the buyer product or payment workflow.
 
-## Implemented but still requiring final validation
+## Verification performed
 
-- Runtime AI endpoints need deployment validation on the deployed environment.
-- Final browser validation of the ML evidence panel at 1440×900, 1280×720, 768×720 and 390×844.
-- Final console/API validation after the visual integration.
+- Backend unittest suite: 94 tests passed in the local suite; provider and payment interactions are mocked.
+- Frontend JavaScript syntax, Python compilation, local asset references, Postman JSON parsing, and `git diff --check` passed in the audit run.
+- No browser workflow, live Gemini request, Channel3 request, PayPal sandbox order/capture, webhook delivery, or Render deployment was verified.
 
-## Designed, not yet implemented
+## Credentials and blockers
 
-- Decision Contract.
-- Tool-using LLM agent.
-- Adversarial/red-team agent.
-- Failure-cascade graph runtime.
-- Policy Engine.
-- Execution Governor.
-- Immutable agent audit trace.
-- Failure-injection laboratory.
-- Counterfactual explorer.
-- Recovery benchmark with measured money recovered.
-- Shadow mode.
-- Drift detection.
+- A nonempty `GEMINI_API_KEY` is present in the ignored local `.env`; its value is deliberately not recorded here.
+- PayPal sandbox client ID, client secret, webhook ID, and Channel3 API key were not configured in the local `.env` or process environment at audit time.
+- Buyer and seller identity, Passport ownership, and report ownership are unauthenticated. Rate limiting is not implemented.
+- No independent evidence verification source exists. Unverified or simulated evidence cannot pass conditions, so the current demo safely escalates and blocks checkout.
+- Shipping, taxes, fulfilment monitoring, refunds, PayPal dispute filing, and dispute adjudication are not implemented.
+- Render configuration exists, but services, secrets, webhook registration, CORS origin, and public URLs still require account setup and deployment verification.
 
-## Truth policy
+## Readiness
 
-A feature is **DONE** only when:
-
-1. code exists;
-2. tests or reproducible evidence exist;
-3. the feature can be demonstrated;
-4. documentation matches the implementation.
-
-Until then it stays explicitly marked as pending.
-
-## ML boundary
-
-The learned SLA-risk model is an experimental second safety layer. Its training/evaluation data are synthetic MIRROR scenarios with SKU-held-out evaluation. It must not be described as production-validated or as evidence of increased profit. The deterministic P05 decision engine remains the existing transaction-selection authority.
+**Controlled prototype.** It is not production-ready or a complete sandbox payment demonstration. See the repository README for current launch instructions and the exact limitations.

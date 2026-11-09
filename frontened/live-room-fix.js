@@ -1,3 +1,5 @@
+import { apiUrl } from './api-config.js';
+
 const liveSku = document.querySelector('#live-sku');
 
 function normalizeLiveSkuLabels() {
@@ -30,9 +32,9 @@ window.fetch = async (input, init = {}) => {
   try {
     const payload = JSON.parse(init.body || '{}');
     if (payload.substitution_tolerance === 1 && payload.sku_id && payload.requested_quantity > 0) {
-      const skuResponse = await nativeFetch('/skus/' + encodeURIComponent(payload.sku_id));
+      const skuResponse = await nativeFetch(apiUrl('/skus/' + encodeURIComponent(payload.sku_id)));
       const availabilityResponse = await nativeFetch(
-        '/availability/' + encodeURIComponent(payload.sku_id) + '?days=' + encodeURIComponent(payload.deadline_days),
+        apiUrl('/availability/' + encodeURIComponent(payload.sku_id) + '?days=' + encodeURIComponent(payload.deadline_days)),
       );
       if (skuResponse.ok && availabilityResponse.ok) {
         const sku = await skuResponse.json();

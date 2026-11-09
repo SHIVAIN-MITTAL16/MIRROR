@@ -31,7 +31,7 @@ function caseCard(item) {
 }
 
 async function mountMLRisk() {
-  const response = await fetch('/ui/assets/ml-risk-evidence.json');
+  const response = await fetch('./assets/ml-risk-evidence.json');
   if (!response.ok) throw new Error('ML risk evidence unavailable');
   const evidence = await response.json();
   const pipeline = document.querySelector('#pipeline');

@@ -36,6 +36,29 @@ class LiveDecisionTests(unittest.TestCase):
         self.assertGreaterEqual(body["candidate_count"], body["p05_gate_rejections"])
         self.assertTrue(body["evidence_status"].startswith("FRESH_DETERMINISTIC_EVALUATION_WITH_LIVE_ML"))
 
+    def test_development_cors_allows_only_configured_frontend_origin(self):
+        allowed = self.client.options(
+            "/api/passport-intents/extract",
+            headers={
+                "Origin": "http://127.0.0.1:5501",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(allowed.headers.get("access-control-allow-origin"), "http://127.0.0.1:5501")
+        self.assertNotIn("access-control-allow-credentials", allowed.headers)
+
+        denied = self.client.options(
+            "/api/passport-intents/extract",
+            headers={
+                "Origin": "http://127.0.0.1:5502",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+        self.assertNotIn("access-control-allow-origin", denied.headers)
+
     def test_live_budget_is_a_real_baseline_constraint(self):
         quantity = 25
         budget = self.sku["current_price"] * quantity * 0.50

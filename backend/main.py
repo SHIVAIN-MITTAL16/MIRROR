@@ -7,25 +7,39 @@ from hashlib import sha256
 from types import MappingProxyType
 from collections import Counter
 import json
-import base64
-import hmac
-import hashlib
 import os
 import random
 from time import perf_counter
 from decimal import Decimal, ROUND_HALF_UP
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from backend.passports import initialize_database, router as passports_router
+from backend.intent_extraction import router as passport_intents_router
 
 
 APP = FastAPI()
+cors_origins = [
+	origin.strip().rstrip("/")
+	for origin in os.getenv("MIRROR_CORS_ORIGINS", "http://127.0.0.1:5501").split(",")
+	if origin.strip()
+]
+if "*" in cors_origins:
+	raise ValueError("MIRROR_CORS_ORIGINS must list explicit origins; wildcard origins are not allowed")
+APP.add_middleware(
+	CORSMiddleware,
+	allow_origins=cors_origins,
+	allow_credentials=False,
+	allow_methods=["GET", "POST"],
+	allow_headers=["Content-Type"],
+)
+APP.include_router(passports_router)
+APP.include_router(passport_intents_router)
 
 SKU_COLUMNS = [
 	"sku_id", "price_tier", "margin_profile", "list_price", "current_price",
@@ -1012,63 +1026,6 @@ def load_buyer_request_records() -> Dict:
 	return indexed
 
 
-def payment_configuration() -> Dict:
-	key_id = os.getenv("RAZORPAY_KEY_ID")
-	key_secret = os.getenv("RAZORPAY_KEY_SECRET")
-	return {"configured": bool(key_id and key_secret), "key_id": key_id, "key_secret": key_secret}
-
-
-PAYMENT_ORDERS: Dict[str, Dict] = {}
-
-
-def selected_candidate_for_request(seed: int, request_id: int) -> Dict:
-	try:
-		record = load_dashboard_artifacts()["requests"][(seed, request_id)]
-	except KeyError as error:
-		raise HTTPException(status_code=404, detail="Persisted MIRROR request not found") from error
-	if record["decision"] != "NEGOTIATE" or not record.get("best_candidate"):
-		raise HTTPException(status_code=409, detail="Only a selected MIRROR negotiation candidate is payable")
-	best = record["best_candidate"]
-	if not best.get("passes_risk_gate"):
-		raise HTTPException(status_code=409, detail="Selected candidate must pass the persisted risk gate")
-	matching = [
-		candidate for candidate in record["candidates"]
-		if candidate["sku_id"] == best["sku_id"]
-		and candidate["action_type"] == best["action_type"]
-		and candidate["quantity"] == best["quantity"]
-		and candidate["delivery_window_days"] == best["delivery_window_days"]
-		and candidate["candidate_price"] == best["candidate_price"]
-	]
-	if len(matching) != 1:
-		raise HTTPException(status_code=409, detail="Persisted selected candidate cannot be validated")
-	return best
-
-
-def candidate_amount_paise(candidate: Dict) -> int:
-	amount = Decimal(str(candidate["candidate_price"])) * Decimal(str(candidate["quantity"]))
-	return int((amount * Decimal("100")).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-
-
-def razorpay_create_order(amount: int, receipt: str, configuration: Dict) -> Dict:
-	"""Call Razorpay Orders API with server-only Basic authentication."""
-	payload = json.dumps({"amount": amount, "currency": "INR", "receipt": receipt}).encode("utf-8")
-	credentials = f"{configuration['key_id']}:{configuration['key_secret']}".encode("utf-8")
-	request = Request(
-		"https://api.razorpay.com/v1/orders",
-		data=payload,
-		headers={
-			"Content-Type": "application/json",
-			"Authorization": "Basic " + base64.b64encode(credentials).decode("ascii"),
-		},
-		method="POST",
-	)
-	try:
-		with urlopen(request, timeout=15) as response:
-			return json.loads(response.read().decode("utf-8"))
-	except (HTTPError, URLError, TimeoutError) as error:
-		raise HTTPException(status_code=502, detail="Razorpay order creation failed") from error
-
-
 def deterministic_explanation(record: Dict) -> List[str]:
 	"""Explain a persisted decision strictly from its stored fields."""
 	if record["decision"] == "REJECT":
@@ -1097,6 +1054,7 @@ def deterministic_explanation(record: Dict) -> List[str]:
 
 @APP.on_event("startup")
 def startup_load_data() -> None:
+	initialize_database()
 	locked_data = load_locked_data()
 	APP.state.skus = locked_data["skus"]
 	APP.state.merchant_states = locked_data["merchant_states"]
@@ -1185,7 +1143,6 @@ def dashboard_summary():
 		"negotiation_rate": analysis["negotiate_pct"],
 		"rescue_rate": analysis["constraint_conflict_rescue_rate"],
 		"risk_rejection_rate": analysis["risk_gate_rejection_rate"],
-		"razorpay_test_mode": "CONFIGURED" if payment_configuration()["configured"] else "DISABLED-NO-CREDENTIALS",
 	}
 
 
@@ -1273,60 +1230,8 @@ def dashboard_request(seed: int, request_id: int):
 		"buyer_request": buyer_request,
 		"decision": decision,
 		"explanation": deterministic_explanation(decision),
-		"payment": {
-			"payable": decision["decision"] == "NEGOTIATE",
-			"razorpay_test_mode": "CONFIGURED" if payment_configuration()["configured"] else "DISABLED-NO-CREDENTIALS",
-		},
+		"payment": {"available": False, "reason": "The experimental merchant decision ledger is not a Purchase Passport checkout."},
 	}
-
-
-@APP.post("/payments/create-order")
-def create_payment_order(payload: Dict):
-	configuration = payment_configuration()
-	if not configuration["configured"]:
-		raise HTTPException(status_code=503, detail="Razorpay Test Mode Not Configured")
-	try:
-		seed, request_id = int(payload["seed"]), int(payload["request_id"])
-	except (KeyError, TypeError, ValueError) as error:
-		raise HTTPException(status_code=422, detail="seed and request_id are required") from error
-	candidate = selected_candidate_for_request(seed, request_id)
-	amount = candidate_amount_paise(candidate)
-	receipt = f"mirror-{seed}-{request_id}"
-	order = razorpay_create_order(amount, receipt, configuration)
-	if not order.get("id") or order.get("amount") != amount or order.get("currency") != "INR":
-		raise HTTPException(status_code=502, detail="Razorpay returned an invalid order response")
-	if order["id"] in PAYMENT_ORDERS:
-		raise HTTPException(status_code=409, detail="Duplicate Razorpay order received")
-	PAYMENT_ORDERS[order["id"]] = {
-		"seed": seed, "request_id": request_id, "amount": amount,
-		"candidate": candidate, "verified": False, "payment_id": None,
-	}
-	return {"order_id": order["id"], "amount": amount, "currency": "INR", "key_id": configuration["key_id"]}
-
-
-@APP.post("/payments/verify")
-def verify_payment(payload: Dict):
-	configuration = payment_configuration()
-	if not configuration["configured"]:
-		raise HTTPException(status_code=503, detail="Razorpay Test Mode Not Configured")
-	try:
-		order_id = payload["razorpay_order_id"]
-		payment_id = payload["razorpay_payment_id"]
-		signature = payload["razorpay_signature"]
-	except KeyError as error:
-		raise HTTPException(status_code=422, detail="Razorpay payment verification fields are required") from error
-	order = PAYMENT_ORDERS.get(order_id)
-	if order is None:
-		raise HTTPException(status_code=404, detail="Unknown local Razorpay order")
-	if order["verified"] or order["payment_id"] is not None:
-		raise HTTPException(status_code=409, detail="Payment fulfillment was already processed")
-	body = f"{order_id}|{payment_id}".encode("utf-8")
-	expected = hmac.new(configuration["key_secret"].encode("utf-8"), body, hashlib.sha256).hexdigest()
-	if not hmac.compare_digest(expected, signature):
-		raise HTTPException(status_code=400, detail="Invalid Razorpay payment signature")
-	order["verified"] = True
-	order["payment_id"] = payment_id
-	return {"verified": True, "order_id": order_id, "payment_id": payment_id}
 
 
 STATIC_PATH = Path(__file__).resolve().parents[1] / "frontened"

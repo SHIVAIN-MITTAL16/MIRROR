@@ -1,5 +1,7 @@
 # MIRROR — Final Demo QA Checkpoint
 
+> **Historical record (28 August 2026), superseded by the repository audit dated 9 November 2026.** The browser/deployment observations below describe that earlier branch and deployment only. They are not current browser test results or proof of a reachable deployment. See [Current State](CURRENT_STATE.md) and the root README for current status.
+
 **Date:** 28 August 2026  
 **Branch:** `mirror-visual-redesign`
 
@@ -10,7 +12,7 @@
 - ML SLA-risk evidence boundary and demo cases.
 - Selected transaction, constraint recovery, risk protection, negotiation levers and request explorer sections.
 - New **Live Decision Room** for fresh, non-persisted buyer requests.
-- Razorpay execution boundary and its test-mode safety behavior.
+- Purchase Passport PayPal sandbox execution boundary and its decision gate.
 - Frontend wording against the persisted experiment evidence.
 - Current GitHub CI status and the deployed live-room failure shown in the browser.
 
@@ -105,5 +107,5 @@ Minimum browser smoke test:
 9. Confirm sections 04–10 render without layout or console errors.
 10. Load at least one ACCEPT, one NEGOTIATE and one REJECT request from the explorer.
 11. Confirm REJECT shows **NO SAFE DEAL** rather than a fake selected transaction.
-12. Confirm the Razorpay boundary does not claim a payment succeeded unless test credentials and a real test checkout are actually configured.
+12. Confirm a payment is called successful only after the server confirms a completed PayPal sandbox capture.
 13. Record the demo only after this smoke test passes.

@@ -1,6 +1,6 @@
 # MIRROR — Purchase Assurance Product Specification
 
-**Status:** Phase 1 product foundation  
+**Status:** Product specification and target acceptance criteria; not an implementation inventory. Check [Current State](CURRENT_STATE.md) and the root README for delivered functionality and blockers.
 **Branch:** `mirror-purchase-assurance`  
 **Product:** Buyer-first AI Purchase Assurance Agent
 
@@ -140,7 +140,7 @@ Preserve and reuse where technically appropriate:
 - Existing explainability patterns and decision-pipeline visualisation.
 - Existing risk-model code only if it has a justified role in buyer-facing fulfilment risk and can be validated for that purpose.
 
-Do not carry over merchant-margin optimisation, merchant profit scoring, synthetic benchmark statistics or Razorpay checkout as if they were buyer purchase assurance. These belong to the previous product direction and must be isolated or retired from the new buyer-facing experience.
+Do not carry over merchant-margin optimisation, merchant profit scoring or synthetic benchmark statistics as if they were buyer purchase assurance. These belong to the previous product direction and must be isolated or retired from the new buyer-facing experience.
 
 ## 10. Explicit non-goals for the hackathon MVP
 
