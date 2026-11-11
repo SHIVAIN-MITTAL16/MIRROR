@@ -59,7 +59,7 @@ if (buyer) {
     const headers = new Headers(options.headers || {});
     const method = (options.method || 'GET').toUpperCase();
     if (!['GET', 'HEAD'].includes(method)) {
-      const csrf = document.cookie.split('; ').find(item => item.startsWith('mirror_csrf='))?.split('=').slice(1).join('=') || '';
+      const csrf = window.mirrorCsrfToken || document.cookie.split('; ').find(item => item.startsWith('mirror_csrf='))?.split('=').slice(1).join('=') || '';
       headers.set('X-Mirror-CSRF', decodeURIComponent(csrf));
     }
     const response = await fetch(apiUrl(path), { ...options, headers, credentials: 'include' });

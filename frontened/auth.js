@@ -16,17 +16,20 @@ root.innerHTML = `<h2>Secure MIRROR session</h2>
 document.querySelector('main')?.prepend(root);
 
 const $ = selector => root.querySelector(selector);
-const csrf = () => document.cookie.split('; ').find(item => item.startsWith('mirror_csrf='))?.split('=').slice(1).join('=') || '';
+let authFlowVersion = 0;
+const csrf = () => window.mirrorCsrfToken || document.cookie.split('; ').find(item => item.startsWith('mirror_csrf='))?.split('=').slice(1).join('=') || '';
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
   if (!['GET', 'HEAD'].includes((options.method || 'GET').toUpperCase())) headers.set('X-Mirror-CSRF', decodeURIComponent(csrf()));
   const response = await fetch(apiUrl(path), { ...options, headers, credentials: 'include' });
   const data = await response.json().catch(() => null);
   if (!response.ok) throw new Error(typeof data?.detail === 'string' ? data.detail : data?.detail?.message || `Request failed (${response.status}).`);
+  if (typeof data?.csrf_token === 'string') window.mirrorCsrfToken = data.csrf_token;
   return data;
 }
 
 function showSession(user) {
+  if (!user) window.mirrorCsrfToken = '';
   $('#mirror-auth-form').hidden = Boolean(user);
   $('#mirror-auth-session').hidden = !user;
   $('#mirror-auth-status').textContent = user ? `Signed in as ${user.email} · ${user.role}${user.seller_id ? ` · Seller account ID: ${user.seller_id}` : ''}` : '';
@@ -72,6 +75,7 @@ async function loadGrants() {
 
 $('#mirror-auth-form').addEventListener('submit', async event => {
   event.preventDefault();
+  authFlowVersion += 1;
   const form = event.currentTarget;
   const action = event.submitter?.value === 'register' ? 'register' : 'login';
   const payload = { email: form.elements.email.value, password: form.elements.password.value };
@@ -80,6 +84,7 @@ $('#mirror-auth-form').addEventListener('submit', async event => {
   catch (error) { $('#mirror-auth-error').textContent = error.message; }
 });
 $('#mirror-auth-logout').addEventListener('click', async () => {
+  authFlowVersion += 1;
   try { await api('/api/auth/logout', { method: 'POST' }); showSession(null); }
   catch (error) { $('#mirror-auth-error').textContent = error.message; }
 });
@@ -92,8 +97,12 @@ $('#mirror-create-grant').addEventListener('click', async () => {
   } catch (error) { $('#mirror-auth-error').textContent = error.message; }
 });
 
-// A fresh browser has no MIRROR session cookie. Avoid probing the protected
-// session endpoint anonymously; once registration/login sets the readable CSRF
-// cookie, it also serves as a same-host hint that a session may exist.
-if (csrf()) api('/api/auth/me').then(showSession).catch(() => showSession(null));
-else showSession(null);
+// This no-store endpoint returns an authenticated session and its CSRF token,
+// or a normal anonymous result without creating an expected browser 401.
+api('/api/auth/session').then(session => {
+  if (authFlowVersion !== 0) return;
+  if (session.authenticated) {
+    if (typeof session.csrf_token === 'string') window.mirrorCsrfToken = session.csrf_token;
+    showSession(session.user);
+  } else showSession(null);
+}).catch(() => showSession(null));

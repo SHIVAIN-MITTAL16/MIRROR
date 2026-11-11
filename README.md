@@ -746,7 +746,7 @@ The script starts the backend and static frontend on free loopback ports, waits 
 - PAYPAL_WEBHOOK_ID enables signature-verified webhook reconciliation after registering a webhook in the PayPal sandbox developer application.
 - CHANNEL3_API_KEY is optional and enables the documented Channel3 search/details adapter. Without it, product discovery reports configuration required.
 - MIRROR_API_BASE_URL defaults to http://127.0.0.1:8002; the deployment build injects the static frontend API origin.
-- `MIRROR_CORS_ORIGINS` defaults to `http://127.0.0.1:5501`; credentialed CORS is limited to explicit origins.
+- `MIRROR_CORS_ORIGINS` defaults to the local frontend and `https://mirror-ui-cl6q.onrender.com`; credentialed CORS is limited to these explicit origins. Set the exact deployed UI origin for other deployments. HTTPS auth cookies use `SameSite=None; Secure`; the authenticated session response supplies the CSRF token to the frontend, which continues sending `X-Mirror-CSRF` on mutations.
 
 ## Deterministic demo journey
 

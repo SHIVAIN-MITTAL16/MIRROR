@@ -19,18 +19,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from backend.auth import router as auth_router
+from backend.auth import configured_cors_origins, router as auth_router
 from backend.passports import initialize_database, router as passports_router, seller_router as seller_access_router
 from backend.intent_extraction import router as passport_intents_router
 from backend.catalogue_verification import router as catalogue_verification_router
 
 
 APP = FastAPI()
-cors_origins = [
-	origin.strip().rstrip("/")
-	for origin in os.getenv("MIRROR_CORS_ORIGINS", "http://127.0.0.1:5501").split(",")
-	if origin.strip()
-]
+cors_origins = configured_cors_origins()
 if "*" in cors_origins:
 	raise ValueError("MIRROR_CORS_ORIGINS must list explicit origins; wildcard origins are not allowed")
 APP.add_middleware(

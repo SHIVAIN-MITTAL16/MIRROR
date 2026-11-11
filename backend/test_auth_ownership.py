@@ -156,6 +156,61 @@ class AuthOwnershipTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.buyer_a.get(f"/api/passports/{passport['id']}").status_code, 401)
 
+    def test_render_cross_origin_session_cookie_and_csrf_flow(self):
+        frontend_origin = "https://mirror-ui-cl6q.onrender.com"
+        client = TestClient(APP, base_url="https://mirror-api-4phi.onrender.com")
+        with client:
+            registered = client.post("/api/auth/register", headers={"Origin": frontend_origin}, json={
+                "email": "render-cross-site@example.test",
+                "password": "Render-Cross-Site-Password-2060!",
+                "role": "buyer",
+            })
+            self.assertEqual(registered.status_code, 201, registered.text)
+            self.assertTrue(registered.json().get("csrf_token"))
+            cookies = registered.headers.get_list("set-cookie")
+            session_cookie = next(item for item in cookies if item.startswith("mirror_session="))
+            csrf_cookie = next(item for item in cookies if item.startswith("mirror_csrf="))
+            self.assertIn("httponly", session_cookie.lower())
+            self.assertIn("secure", session_cookie.lower())
+            self.assertIn("samesite=none", session_cookie.lower())
+            self.assertIn("secure", csrf_cookie.lower())
+            self.assertIn("samesite=none", csrf_cookie.lower())
+            self.assertNotIn("httponly", csrf_cookie.lower())
+
+            preflight = client.options("/api/passports", headers={
+                "Origin": frontend_origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type,x-mirror-csrf",
+            })
+            self.assertEqual(preflight.status_code, 200)
+            self.assertEqual(preflight.headers.get("access-control-allow-origin"), frontend_origin)
+            self.assertEqual(preflight.headers.get("access-control-allow-credentials"), "true")
+
+            restored = client.get("/api/auth/session", headers={"Origin": frontend_origin})
+            self.assertEqual(restored.status_code, 200)
+            self.assertTrue(restored.json()["authenticated"])
+            csrf_token = restored.json()["csrf_token"]
+            self.assertEqual(csrf_token, registered.json()["csrf_token"])
+            whoami = client.get("/api/auth/me", headers={"Origin": frontend_origin})
+            self.assertEqual(whoami.status_code, 200, whoami.text)
+            self.assertEqual(whoami.json()["id"], restored.json()["user"]["id"])
+
+            payload = {"buyer_intent": "A new camera", "currency": "USD"}
+            denied = client.post("/api/passports", headers={"Origin": frontend_origin}, json=payload)
+            self.assertEqual(denied.status_code, 403)
+            created = client.post("/api/passports", headers={
+                "Origin": frontend_origin, "X-Mirror-CSRF": csrf_token,
+            }, json=payload)
+            self.assertEqual(created.status_code, 201, created.text)
+
+            wrong_origin = client.options("/api/passports", headers={
+                "Origin": "https://attacker.example",
+                "Access-Control-Request-Method": "POST",
+            })
+            self.assertNotIn("access-control-allow-origin", wrong_origin.headers)
+            blocked_restore = client.get("/api/auth/session", headers={"Origin": "https://attacker.example"})
+            self.assertEqual(blocked_restore.status_code, 403)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -18,6 +18,16 @@ password_hash = PasswordHash.recommended()
 SESSION_COOKIE = "mirror_session"
 CSRF_COOKIE = "mirror_csrf"
 SESSION_TTL = timedelta(hours=12)
+DEFAULT_CORS_ORIGINS = (
+    "http://127.0.0.1:5501",
+    "https://mirror-ui-cl6q.onrender.com",
+)
+
+
+def configured_cors_origins() -> list[str]:
+    configured = os.getenv("MIRROR_CORS_ORIGINS")
+    raw_origins = configured if configured is not None else ",".join(DEFAULT_CORS_ORIGINS)
+    return [origin.strip().rstrip("/") for origin in raw_origins.split(",") if origin.strip()]
 
 
 class RegistrationRequest(BaseModel):
@@ -61,7 +71,9 @@ def _token_digest(value: str) -> str:
 
 
 def _cookie_options(request: Request) -> dict:
-    return {"httponly": True, "secure": request.url.scheme == "https", "samesite": "strict", "path": "/"}
+    cross_site_https = request.url.scheme == "https"
+    return {"httponly": True, "secure": cross_site_https,
+            "samesite": "none" if cross_site_https else "strict", "path": "/"}
 
 
 def _set_session(response: Response, request: Request, user: dict) -> dict:
@@ -74,11 +86,12 @@ def _set_session(response: Response, request: Request, user: dict) -> dict:
         db.execute("INSERT INTO auth_sessions(id,user_id,token_hash,csrf_hash,created_at,expires_at) VALUES(?,?,?,?,?,?)",
                    (str(uuid4()), user["id"], _token_digest(session_token), _token_digest(csrf_token), now.isoformat(), expires))
     options = _cookie_options(request)
+    response.headers["Cache-Control"] = "no-store"
     response.set_cookie(SESSION_COOKIE, session_token, max_age=int(SESSION_TTL.total_seconds()), **options)
     response.set_cookie(CSRF_COOKIE, csrf_token, max_age=int(SESSION_TTL.total_seconds()), httponly=False,
-                        secure=options["secure"], samesite="strict", path="/")
+                        secure=options["secure"], samesite=options["samesite"], path="/")
     return {"user": {"id": user["id"], "email": user["email"], "role": user["role"], "seller_id": user.get("seller_id")},
-            "expires_at": expires}
+            "expires_at": expires, "csrf_token": csrf_token}
 
 
 def authenticate_request(request: Request, *, require_csrf: bool = True) -> dict:
@@ -106,9 +119,7 @@ def authenticate_request(request: Request, *, require_csrf: bool = True) -> dict
                 or not secrets.compare_digest(_token_digest(csrf_cookie), row["csrf_hash"])):
             raise HTTPException(status_code=403, detail="CSRF validation failed")
         origin = request.headers.get("Origin")
-        if origin and origin.rstrip("/") not in {
-            item.strip().rstrip("/") for item in os.getenv("MIRROR_CORS_ORIGINS", "http://127.0.0.1:5501").split(",")
-        }:
+        if origin and origin.rstrip("/") not in set(configured_cors_origins()):
             raise HTTPException(status_code=403, detail="Request origin is not allowed")
     return {"id": row["id"], "email": row["email"], "role": row["role"], "seller_id": row["seller_id"]}
 
@@ -165,6 +176,29 @@ def me(request: Request):
     return authenticate_request(request, require_csrf=False)
 
 
+@router.get("/session")
+def session_status(request: Request, response: Response):
+    """Restore a browser session without producing an anonymous 401 probe."""
+    response.headers["Cache-Control"] = "no-store"
+    _check_auth_origin(request)
+    try:
+        user = authenticate_request(request, require_csrf=False)
+    except HTTPException as error:
+        if error.status_code == 401:
+            return {"authenticated": False, "user": None}
+        raise
+
+    token = request.cookies.get(CSRF_COOKIE, "")
+    session_token = request.cookies.get(SESSION_COOKIE, "")
+    connect, _ = _db_helpers()
+    with connect() as db:
+        row = db.execute("SELECT csrf_hash FROM auth_sessions WHERE token_hash=? AND revoked_at IS NULL",
+                         (_token_digest(session_token),)).fetchone()
+    if row is None or not token or not secrets.compare_digest(_token_digest(token), row["csrf_hash"]):
+        return {"authenticated": False, "user": None}
+    return {"authenticated": True, "user": user, "csrf_token": token}
+
+
 @router.post("/logout")
 def logout(request: Request, response: Response):
     connect, utc_now = _db_helpers()
@@ -174,8 +208,8 @@ def logout(request: Request, response: Response):
         db.execute("UPDATE auth_sessions SET revoked_at=? WHERE token_hash=? AND user_id=? AND revoked_at IS NULL",
                    (utc_now(), _token_digest(token), user["id"]))
     options = _cookie_options(request)
-    response.delete_cookie(SESSION_COOKIE, path="/", secure=options["secure"], httponly=True, samesite="strict")
-    response.delete_cookie(CSRF_COOKIE, path="/", secure=options["secure"], samesite="strict")
+    response.delete_cookie(SESSION_COOKIE, path="/", secure=options["secure"], httponly=True, samesite=options["samesite"])
+    response.delete_cookie(CSRF_COOKIE, path="/", secure=options["secure"], samesite=options["samesite"])
     return {"logged_out": True}
 
 
@@ -188,6 +222,6 @@ def seller_grants_for_passport(db, passport_id: str, seller_id: str) -> bool:
 
 def _check_auth_origin(request: Request) -> None:
     origin = request.headers.get("Origin")
-    allowed = {item.strip().rstrip("/") for item in os.getenv("MIRROR_CORS_ORIGINS", "http://127.0.0.1:5501").split(",")}
+    allowed = set(configured_cors_origins())
     if origin and origin.rstrip("/") not in allowed:
         raise HTTPException(status_code=403, detail="Request origin is not allowed")

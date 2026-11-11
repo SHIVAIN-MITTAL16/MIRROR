@@ -363,7 +363,7 @@ if (root) {
     confirmButton.textContent = 'Saving reviewed conditions…';
     setStatus('Saving your explicit declaration…', 'loading');
     try {
-      const csrf = document.cookie.split('; ').find(item => item.startsWith('mirror_csrf='))?.split('=').slice(1).join('=') || '';
+      const csrf = window.mirrorCsrfToken || document.cookie.split('; ').find(item => item.startsWith('mirror_csrf='))?.split('=').slice(1).join('=') || '';
       const response = await fetch(apiUrl('/api/passports/confirm-intent'), {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', 'X-Mirror-CSRF': decodeURIComponent(csrf) }, body: JSON.stringify(payload),
       });
