@@ -17,3 +17,5 @@ data/*.sqlite3-wal
 *.db-shm
 *.db-wal
 .env
+
+build/
