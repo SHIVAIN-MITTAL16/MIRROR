@@ -7,8 +7,11 @@ from pydantic import BaseModel
 
 
 OUTCOMES = ("APPROVE", "NEGOTIATE", "REJECT", "ESCALATE")
-NUMERIC_TYPES = {"price", "quantity", "delivery_days"}
-TEXT_TYPES = {"product_name", "seller_name", "currency", "return_terms", "item_condition", "sku_id"}
+NUMERIC_TYPES = {"price", "quantity", "delivery_days", "ram", "storage_capacity"}
+TEXT_TYPES = {
+    "product_name", "seller_name", "currency", "return_terms", "item_condition", "sku_id",
+    "brand", "model", "processor_family", "display_resolution", "operating_system",
+}
 CONDITION_TYPES = NUMERIC_TYPES | TEXT_TYPES
 NUMERIC_OPERATORS = {"eq", "ne", "lt", "lte", "gt", "gte"}
 TEXT_OPERATORS = {"eq", "ne"}
@@ -90,26 +93,96 @@ def _evaluate_condition(condition: dict, evidence: list[dict]) -> ConditionDecis
         if condition.get("operator") not in allowed_operators:
             reasons.append("unsupported_operator")
 
-    evidence_ids = [item["id"] for item in evidence]
+    evidence_ids = list(dict.fromkeys(item["id"] for item in evidence))
     observed_values: list[str] = []
     if not evidence:
         reasons.append("evidence_missing_or_unlinked")
     else:
+        fresh_catalogue_claims = [
+            claim
+            for item in evidence
+            if item.get("evidence_type") == "channel3_product_catalogue"
+            and item.get("source_classification") == "server_source"
+            and not item.get("is_simulated")
+            and not item.get("evidence_stale")
+            and item.get("verification_status") == "verified"
+            and item.get("lifecycle_state") == "verified"
+            for claim in item.get("claims", [])
+            if claim.get("claim_type") == condition_type
+            and claim.get("verification_event_state") == "verified"
+        ]
+        independent_claim_supports_type = any(
+            item.get("source_classification") == "server_source"
+            and not item.get("is_simulated")
+            and not item.get("evidence_stale")
+            and item.get("verification_status") == "verified"
+            and item.get("lifecycle_state") == "verified"
+            and any(
+                claim.get("claim_type") == condition_type
+                and claim.get("verification_event_state") == "verified"
+                for claim in item.get("claims", [])
+            )
+            for item in evidence
+        )
         for item in evidence:
+            if item.get("evidence_stale") and item.get("evidence_type") == "channel3_product_catalogue":
+                stale_claims = [
+                    claim for claim in item.get("claims", [])
+                    if claim.get("claim_type") == condition_type
+                    and claim.get("verification_event_state") == "verified"
+                ]
+                if fresh_catalogue_claims:
+                    if all(any(
+                        stale.get("claim_value") == fresh.get("claim_value")
+                        and str(stale.get("unit") or "").casefold() == str(fresh.get("unit") or "").casefold()
+                        for fresh in fresh_catalogue_claims
+                    ) for stale in stale_claims):
+                        continue
+                    observed_values.extend(claim.get("claim_value", "") for claim in stale_claims)
+                    reasons.append("conflicting_verified_evidence")
+                    continue
+                reasons.append("evidence_stale")
+                continue
+            # Seller text is always retained and displayed as a declaration.
+            # A seller declaration stays visible, but does not act as additional
+            # proof when an independent server source has an exact scoped claim.
+            # Conflicts create no matching claim and therefore remain unresolved.
+            if (
+                independent_claim_supports_type
+                and item.get("evidence_type") == "seller_offer_text"
+                and item.get("source_classification") == "client_submitted"
+            ):
+                continue
             if item.get("is_simulated"):
                 reasons.append("simulated_evidence")
-            if not item.get("claim_id"):
+            if item.get("evidence_stale"):
+                reasons.append("evidence_stale")
+            claims = item.get("claims")
+            if claims is None:
+                # Keep the pure evaluator's earlier input shape useful to
+                # callers while persisted evaluation supplies grouped claims.
+                claims = ([{
+                    "claim_id": item.get("claim_id"),
+                    "claim_type": item.get("claim_type"),
+                    "claim_value": item.get("claim_value", ""),
+                    "unit": item.get("claim_unit"),
+                    "verification_event_state": item.get("verification_event_state"),
+                }] if item.get("claim_id") else [])
+            if not claims:
                 reasons.append("evidence_missing_or_unlinked")
-            elif item.get("claim_type") != condition_type:
-                reasons.append("evidence_scope_mismatch")
             if (
                 item.get("verification_status") != "verified"
                 or item.get("lifecycle_state") != "verified"
-                or item.get("verification_event_state") != "verified"
             ):
                 reasons.append("evidence_not_verified")
-            if item.get("claim_id"):
-                observed_values.append(item.get("claim_value", ""))
+            for claim in claims:
+                if claim.get("claim_type") != condition_type:
+                    reasons.append("evidence_scope_mismatch")
+                if condition.get("unit") is not None and str(claim.get("unit") or "").casefold() != str(condition.get("unit")).casefold():
+                    reasons.append("evidence_scope_mismatch")
+                if claim.get("verification_event_state") != "verified":
+                    reasons.append("evidence_not_verified")
+                observed_values.append(claim.get("claim_value", ""))
 
     # Even a matching verified item cannot mask a second unverified or simulated
     # item attached to the same condition.

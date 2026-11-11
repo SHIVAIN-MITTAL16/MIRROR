@@ -3,7 +3,7 @@ import unittest
 from fastapi.testclient import TestClient
 
 from backend.ai_app import app
-from backend.main import load_locked_data
+from backend.main import cors_origins, load_locked_data
 
 
 class LiveDecisionTests(unittest.TestCase):
@@ -47,7 +47,8 @@ class LiveDecisionTests(unittest.TestCase):
         )
         self.assertEqual(allowed.status_code, 200)
         self.assertEqual(allowed.headers.get("access-control-allow-origin"), "http://127.0.0.1:5501")
-        self.assertNotIn("access-control-allow-credentials", allowed.headers)
+        self.assertEqual(allowed.headers.get("access-control-allow-credentials"), "true")
+        self.assertNotEqual(allowed.headers.get("access-control-allow-origin"), "*")
 
         denied = self.client.options(
             "/api/passport-intents/extract",
@@ -58,6 +59,11 @@ class LiveDecisionTests(unittest.TestCase):
             },
         )
         self.assertNotIn("access-control-allow-origin", denied.headers)
+        self.assertNotEqual(denied.headers.get("access-control-allow-origin"), "*")
+        # Starlette may emit this header on the middleware response, but without
+        # Access-Control-Allow-Origin the browser cannot grant the origin access.
+        self.assertIn("http://127.0.0.1:5501", cors_origins)
+        self.assertNotIn("*", cors_origins)
 
     def test_live_budget_is_a_real_baseline_constraint(self):
         quantity = 25

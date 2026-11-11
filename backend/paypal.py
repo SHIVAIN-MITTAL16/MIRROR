@@ -9,14 +9,15 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.request import Request as URLRequest, urlopen
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request as FastAPIRequest
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from backend.passports import connect, evaluate_passport_state, utc_now
+from backend.passports import connect, evaluate_passport_state, utc_now, require_buyer_passport
+from backend.auth import require_authenticated
 
 
 DEFAULT_PAYPAL_BASE_URL = "https://api-m.sandbox.paypal.com"
@@ -80,7 +81,7 @@ def paypal_configuration() -> dict[str, Any]:
 
 
 def _http_json_request(method: str, url: str, headers: dict[str, str], payload: dict | None = None) -> dict:
-    request = Request(
+    request = URLRequest(
         url,
         data=json.dumps(payload).encode("utf-8") if payload is not None else None,
         headers={"Accept": "application/json", **headers},
@@ -102,7 +103,7 @@ def _http_json_request(method: str, url: str, headers: dict[str, str], payload: 
 
 def _request_access_token(config: dict[str, Any]) -> str:
     credentials = f"{config['client_id']}:{config['client_secret']}".encode("utf-8")
-    request = Request(
+    request = URLRequest(
         f"{config['base_url']}/v1/oauth2/token",
         data=b"grant_type=client_credentials",
         headers={
@@ -243,8 +244,8 @@ def public_paypal_config():
     }
 
 
-@router.post("/passports/{passport_id}/paypal/order")
-def create_passport_paypal_order(passport_id: str, payload: CreateOrderRequest):
+@router.post("/passports/{passport_id}/paypal/order", dependencies=[Depends(require_authenticated)])
+def create_passport_paypal_order(passport_id: str, payload: CreateOrderRequest, request: FastAPIRequest):
     config = paypal_configuration()
     if not config["configured"]:
         raise HTTPException(status_code=503, detail={
@@ -255,6 +256,7 @@ def create_passport_paypal_order(passport_id: str, payload: CreateOrderRequest):
     with connect() as db:
         db.execute("BEGIN IMMEDIATE")
         passport = db.execute("SELECT * FROM purchase_passports WHERE id = ?", (passport_id,)).fetchone()
+        require_buyer_passport(db, passport_id, request.state.user)
         offer = db.execute(
             "SELECT * FROM offer_snapshots WHERE id = ? AND passport_id = ?",
             (payload.offer_id, passport_id),
@@ -330,14 +332,15 @@ def create_passport_paypal_order(passport_id: str, payload: CreateOrderRequest):
     }
 
 
-@router.post("/passports/{passport_id}/paypal/capture")
-def capture_passport_paypal_order(passport_id: str, payload: CaptureOrderRequest):
+@router.post("/passports/{passport_id}/paypal/capture", dependencies=[Depends(require_authenticated)])
+def capture_passport_paypal_order(passport_id: str, payload: CaptureOrderRequest, request: FastAPIRequest):
     config = paypal_configuration()
     if not config["configured"]:
         raise HTTPException(status_code=503, detail="PayPal sandbox is not configured")
     with connect() as db:
         db.execute("BEGIN IMMEDIATE")
         passport = db.execute("SELECT * FROM purchase_passports WHERE id=?", (passport_id,)).fetchone()
+        require_buyer_passport(db, passport_id, request.state.user)
         if passport is None:
             raise HTTPException(status_code=404, detail="Passport not found")
         if passport["paypal_order_id"] != payload.order_id:
@@ -443,10 +446,11 @@ def capture_passport_paypal_order(passport_id: str, payload: CaptureOrderRequest
     })
 
 
-@router.post("/passports/{passport_id}/paypal/cancel")
-def cancel_passport_paypal_order(passport_id: str, payload: CaptureOrderRequest):
+@router.post("/passports/{passport_id}/paypal/cancel", dependencies=[Depends(require_authenticated)])
+def cancel_passport_paypal_order(passport_id: str, payload: CaptureOrderRequest, request: FastAPIRequest):
     with connect() as db:
         passport = db.execute("SELECT * FROM purchase_passports WHERE id=?", (passport_id,)).fetchone()
+        require_buyer_passport(db, passport_id, request.state.user)
         if passport is None:
             raise HTTPException(status_code=404, detail="Passport not found")
         if passport["paypal_order_id"] != payload.order_id:
@@ -463,7 +467,7 @@ def cancel_passport_paypal_order(passport_id: str, payload: CaptureOrderRequest)
 
 
 @router.post("/paypal/webhooks")
-async def paypal_webhook(request: Request):
+async def paypal_webhook(request: FastAPIRequest):
     """Ask PayPal to verify each transmission before reconciling capture state."""
     config = paypal_configuration()
     webhook_id = os.getenv("PAYPAL_WEBHOOK_ID", "").strip()

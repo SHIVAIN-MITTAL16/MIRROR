@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from backend.test_auth_client import AuthenticatedTestClient
 from fastapi.routing import APIRoute
 
 from backend.main import APP
@@ -29,7 +30,7 @@ class PassportApiTests(unittest.TestCase):
         cls.temp_dir = tempfile.TemporaryDirectory()
         cls.old_database_path = os.environ.get("MIRROR_DATABASE_PATH")
         os.environ["MIRROR_DATABASE_PATH"] = str(Path(cls.temp_dir.name) / "passports.sqlite3")
-        cls.client = TestClient(APP)
+        cls.client = AuthenticatedTestClient(APP)
         cls.client.__enter__()
 
     @classmethod
@@ -165,16 +166,22 @@ class PassportApiTests(unittest.TestCase):
         os.environ["MIRROR_DATABASE_PATH"] = str(db_path)
         try:
             initialize_database()
-            response = self.client.get(f"/api/passports/{passport_id}")
+            with AuthenticatedTestClient(APP) as legacy_client:
+                response = legacy_client.get(f"/api/passports/{passport_id}")
         finally:
             if previous_path is None:
                 os.environ.pop("MIRROR_DATABASE_PATH", None)
             else:
                 os.environ["MIRROR_DATABASE_PATH"] = previous_path
 
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(len(response.json()["conditions"]), 1)
-        migrated = response.json()["conditions"][0]
+        self.assertEqual(response.status_code, 404, response.text)
+        with sqlite_connection(db_path) as db:
+            db.row_factory = sqlite3.Row
+            migrated_passport = db.execute(
+                "SELECT buyer_user_id FROM purchase_passports WHERE id=?", (passport_id,)
+            ).fetchone()
+            migrated = db.execute("SELECT * FROM purchase_conditions WHERE id=?", (condition_id,)).fetchone()
+            self.assertIsNone(migrated_passport["buyer_user_id"])
         self.assertEqual(migrated["id"], condition_id)
         self.assertEqual(migrated["owner"], "buyer")
         self.assertTrue(migrated["buyer_confirmed"])

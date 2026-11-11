@@ -4,9 +4,9 @@
 
 MIRROR is a buyer-first AI Purchase Assurance prototype for electronics purchases.
 
-The primary workflow is Gemini buyer-intent extraction, explicit buyer review, Passport creation, seller offer/evidence collection, deterministic evaluation, and decision-gated PayPal sandbox checkout. Gemini only proposes buyer conditions; it does not verify evidence or decide whether payment is safe. Seller-uploaded evidence remains unverified, so missing proof remains unresolved and blocks checkout.
+The primary workflow is Gemini buyer-intent extraction, explicit buyer review, Passport creation, seller offer/evidence collection, deterministic evaluation, and decision-gated PayPal sandbox checkout. Gemini only proposes buyer conditions; it does not verify evidence or decide whether payment is safe. A narrow server-side Channel3 verifier can support only unambiguous catalogue facts. Seller-uploaded evidence remains unverified, and catalogue data never proves seller fulfilment.
 
-Buyer and seller identities and Passport ownership are not authenticated. No independent evidence verifier is implemented. The app cannot safely demonstrate an approved checkout from seller-uploaded evidence. This is a controlled prototype, not production-ready or a complete payment demo.
+Buyer and seller accounts now use Argon2 password hashes and expiring, revocable server-side sessions. Passports are buyer-owned; a buyer grants Passport-scoped access to a registered seller account ID, and the seller must accept before seeing buyer-shared conditions or submitting an offer. Account registration does not independently verify a person's real-world identity or email ownership. Channel3 verification covers a limited set of product catalogue facts and does not verify physical items, warranty, delivery, returns, or fulfilment. Seller-uploaded evidence remains unverified. This remains a controlled prototype, not production-ready.
 
 For launch commands, API payloads, configuration, and limitations, see [Purchase Assurance MVP](#purchase-assurance-mvp-current-local-prototype). Editable unit economics are in [Business Model Projection](docs/business-model.html). Import the [Postman collection](postman/MIRROR-Purchase-Assurance.postman_collection.json) and placeholder [local environment](postman/MIRROR-Local.postman_environment.json); neither contains credentials.
 
@@ -545,6 +545,7 @@ GET  /api/passports
 GET  /api/passports/{passport_id}
 POST /api/passports/{passport_id}/conditions
 POST /api/passports/{passport_id}/evaluate
+POST /api/passports/{passport_id}/offers/{offer_id}/catalogue-verification
 POST /api/passport-intents/extract
 POST /api/passports/{passport_id}/evidence
 GET  /api/passports/{passport_id}/evidence
@@ -553,17 +554,17 @@ GET  /api/passports/{passport_id}/evidence/{evidence_id}
 
 Create a passport with `{"buyer_intent":"A sealed camera delivered by Friday","currency":"USD"}`. Conditions are submitted as a JSON array with `condition_type`, `operator`, `expected_value`, and `hard_or_soft`. `owner` accepts `buyer` or `merchant` and defaults to `buyer` for older clients. The ordinary condition endpoint ignores client-supplied confirmation flags and always creates unconfirmed conditions. Use the explicit buyer-review confirmation endpoint below to persist buyer-confirmed conditions. The database migration assigns existing conditions to the buyer and preserves their existing `buyer_confirmed` values without inventing historical confirmation timestamps. Timestamps are stored in UTC. Passport checkout stores PayPal order and capture references, request idempotency identifiers, and payment state, but never payment credentials or access tokens. Fulfilment events have an `is_simulated` marker so simulated data remains distinguishable from real evidence.
 
-Condition evaluation supports `price`, `quantity`, and `delivery_days` with `eq`, `ne`, `lt`, `lte`, `gt`, or `gte`; `product_name`, `seller_name`, `currency`, `return_terms`, `item_condition`, and `sku_id` support `eq` and `ne`. Other types and operators are reported unresolved. Evidence must be linked to the condition and marked `verified`; simulated evidence never counts as verification. Evidence links can be shared across conditions through the `condition_evidence` table. The evaluation endpoint accepts no client-supplied evidence or verification data. It returns `APPROVE`, `NEGOTIATE`, `REJECT`, or `ESCALATE`, with condition-level passed, failed, and unresolved explanations.
+Condition evaluation supports `price`, `quantity`, `delivery_days`, `ram`, and `storage_capacity` with numeric comparison operators; `product_name`, `seller_name`, `currency`, `return_terms`, `item_condition`, `sku_id`, `brand`, `model`, `processor_family`, `display_resolution`, and `operating_system` support `eq` and `ne`. Other types and operators are reported unresolved. Evidence must be linked to the exact condition and claim; simulated evidence never counts as verification. The evaluation endpoint accepts no client-supplied evidence or verification data. It returns `APPROVE`, `NEGOTIATE`, `REJECT`, or `ESCALATE`, with condition-level passed, failed, and unresolved explanations.
 
 ### Evidence ingestion (Stage 1)
 
 `POST /api/passports/{passport_id}/evidence` accepts JSON text content with `text/plain` or `application/json`, optional claimed source metadata, and optional `condition_ids` from the same Passport. Content is limited to 64 KiB of UTF-8. MIRROR stores the original text, computes SHA-256, and records server `received_at` separately from the untrusted optional `claimed_captured_at`. The digest is an integrity reference, not proof of who created the content or where it came from. Ingestion always creates `lifecycle_state=raw` and `verification_status=unverified`; it does not create claims or fetch source URLs.
 
-Evidence list/detail responses omit original content by default. A detail request can explicitly ask for text using `?include_content=true`. Verification history and claim tables are server-side records; there is no public verification route. Claims are usable by the evaluator only when linked to the condition, scoped to that exact condition type, non-simulated, and backed by a verified server event. Raw evidence alone cannot pass a condition.
+Evidence list/detail responses omit original content by default. A detail request can explicitly ask for text using `?include_content=true`. There is no generic client-controlled verification route. The dedicated Channel3 catalogue-verification endpoint is server-side and accepts only a product ID and refresh flag; clients cannot submit verification status or claims. Claims are usable by the evaluator only when linked to the condition, scoped to that exact condition type, non-simulated, and backed by a verified server event. Raw evidence alone cannot pass a condition.
 
-Verification events, claims, and condition-to-evidence associations are append-only in SQLite. Evidence lifecycle/status updates require a matching latest `server_verifier` event, including verifier identity, verifier version, timestamp, outcome, reason, and the exact claim scope. No verifier is implemented in this phase. A future verifier must use one database transaction: append the event, transition the evidence state, insert only that event's scoped claims, and commit all changes together. It must use the database transaction helper so a failed step rolls back the whole transition and leaves no partial verification state. Existing migration backfills remain unverified and do not infer claims.
+Verification events, claims, and condition-to-evidence associations are append-only in SQLite. Evidence lifecycle/status updates require a matching latest `server_verifier` event, including verifier identity, verifier version, timestamp, outcome, reason, and the exact claim scope. The Channel3 adapter follows this audit flow atomically. It records the server-retrieved product response and digest; the digest does not prove who authored the provider data. Existing migration backfills remain unverified and do not infer claims.
 
-Passport endpoints currently have no authentication. Buyer/merchant identity and ownership are not secured; this API is for a controlled hackathon prototype and is not ready for production multi-user use. The local locked catalog and inventory data are synthetic and must remain labelled simulated rather than treated as trusted merchant evidence.
+Passport APIs require a registered buyer or seller session. Buyer routes check Passport ownership. Sellers can access only Passports where the buyer created a grant for the seller account ID and the seller accepted it. Grant revocation blocks further seller access. Existing Passports and offers migrate with null ownership and are not listed or accessible through authenticated owner routes; ownership is never inferred from IDs or free-text seller names. The local locked catalog and inventory data are synthetic and must remain labelled simulated rather than treated as trusted merchant evidence.
 
 ### Buyer intent extraction and confirmation (Phase 1)
 
@@ -583,7 +584,7 @@ After the buyer reviews and edits the proposals, `POST /api/passports/confirm-in
 }
 ```
 
-The endpoint validates each type/operator pair, numeric values, classification, and exact supporting quote, then creates the Passport and all buyer-owned confirmed conditions in one SQLite transaction. The response is the created Passport with its conditions, each containing `owner: "buyer"`, `buyer_confirmed: true`, and a UTC `buyer_confirmed_at`. Empty or invalid condition sets are rejected. This records an explicit client declaration only: the service has no authentication or Passport ownership checks, so it does not prove who made the declaration. The API remains suitable only for the controlled prototype until authentication and ownership checks are implemented. No Gemini request or evidence verification occurs in this operation.
+The endpoint validates each type/operator pair, numeric values, classification, and exact supporting quote, then creates the Passport and all buyer-owned confirmed conditions in one SQLite transaction. The authenticated buyer becomes Passport owner. The response contains conditions with `owner: "buyer"`, `buyer_confirmed: true`, and a UTC `buyer_confirmed_at`. Empty or invalid condition sets are rejected. This records a declaration by the currently authenticated account; it does not independently verify the user's real-world identity. No Gemini request or evidence verification occurs in this operation.
 
 Set `GEMINI_API_KEY` in the process environment or the ignored repository `.env` file. `GEMINI_MODEL` optionally selects the model; the current default is `gemini-3.5-flash-lite`. API keys are never stored in SQLite or returned in responses. Missing configuration and transient network/timeout failures return an explicitly labelled empty fallback with no proposals. Invalid structured output and permanent provider failures return generic errors. Do not send buyer text containing sensitive personal information unless permitted by the deployment's privacy policy.
 
@@ -695,6 +696,8 @@ The repository contains the deterministic decision engine, Monte Carlo evaluatio
 
 The buyer-first flow uses the existing Gemini extraction and explicit buyer confirmation APIs, then lets a seller submit an offer and text evidence against every buyer condition. Evidence is preserved with a server received timestamp and SHA-256 digest. Seller submitted evidence remains raw/unverified; MIRROR does not claim that it proves the seller's statements.
 
+Buyer and seller accounts use Argon2 password hashes and 12-hour, revocable server-side sessions. Registration is self-service and does not verify email ownership or real-world identity. A buyer grants access to a specific registered seller account ID; the seller must accept the expiring grant before viewing the buyer-shared conditions or submitting an offer. Existing database Passports and offers remain unowned and are not assigned to accounts.
+
 ## Start locally
 
 From the repository root, create the virtual environment once, install dependencies, and run the backend:
@@ -714,7 +717,24 @@ python -m http.server 5501 --directory frontened
 
 After creating `.venv` and installing dependencies once, both services can be started with one command: `powershell -ExecutionPolicy Bypass -File .\scripts\start-local.ps1`.
 
-Open `http://127.0.0.1:5501`. Development CORS allows that exact origin. Set `MIRROR_CORS_ORIGINS` to comma-separated exact origins for a different frontend host. `MIRROR_API_BASE_URL` can override the frontend API base before page load; the local default is `http://127.0.0.1:8002`.
+Open `http://127.0.0.1:5501`. Register a buyer account, create a Passport, then separately register or sign in as a seller in another browser profile/context. Copy the seller account ID displayed after sign-in, return to the buyer session, select the Passport, and grant access to that ID. The seller accepts the grant in their session before submitting an offer. The buyer reviews evidence and evaluates the Passport. Development CORS allows that exact origin. Set `MIRROR_CORS_ORIGINS` to comma-separated exact origins for a different frontend host. `MIRROR_API_BASE_URL` can override the frontend API base before page load; the local default is `http://127.0.0.1:8002`.
+
+## Browser QA on Windows
+
+Install the JavaScript test dependency and Playwright Chromium once:
+
+```powershell
+npm install
+npx playwright install chromium
+```
+
+Run browser tests from a PowerShell terminal:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-browser.ps1
+```
+
+The script starts the backend and static frontend on free loopback ports, waits for health checks, and uses a newly created temporary SQLite database that is removed afterward. It does not take over existing services. Failure screenshots, traces, videos, and browser diagnostics are written under `test-results/browser`; the HTML report is under `playwright-report`. Channel3 product search and catalogue verification run live when `CHANNEL3_API_KEY` is available in the ignored `.env`; otherwise the live product test is reported as skipped after checking the configuration-required UI state. Gemini extraction uses an explicitly marked browser-test response, and the test never creates or captures a PayPal order.
 
 ## Environment variables
 
@@ -726,17 +746,17 @@ Open `http://127.0.0.1:5501`. Development CORS allows that exact origin. Set `MI
 - PAYPAL_WEBHOOK_ID enables signature-verified webhook reconciliation after registering a webhook in the PayPal sandbox developer application.
 - CHANNEL3_API_KEY is optional and enables the documented Channel3 search/details adapter. Without it, product discovery reports configuration required.
 - MIRROR_API_BASE_URL defaults to http://127.0.0.1:8002; the deployment build injects the static frontend API origin.
-- `MIRROR_CORS_ORIGINS` defaults to `http://127.0.0.1:5501`; credentialed CORS is disabled.
+- `MIRROR_CORS_ORIGINS` defaults to `http://127.0.0.1:5501`; credentialed CORS is limited to explicit origins.
 
 ## Deterministic demo journey
 
 1. Enter a synthetic buyer request in Buyer Intent, extract proposals, resolve clarifications, review every value, and explicitly confirm it.
 2. Inspect the saved Passport in Purchase Assurance.
-3. Submit a seller offer, confirm or decline every buyer condition, and attach seller text. The API preserves it as unverified evidence.
+3. In a separate seller session, accept the buyer's Passport-specific grant. Submit an offer, confirm or decline every buyer condition, and attach seller text. The API preserves it as unverified evidence.
 4. Evaluate the selected offer and inspect condition-level reasons, provenance, and audit history.
-5. `Start / replay labelled demo` creates a new `[DEMO]` Passport, an over-budget offer, and a second offer that claims to meet the conditions. Both use simulated evidence and remain unresolved. It does not delete prior audit records.
+5. `Start / replay labelled demo` creates a new `[DEMO]` buyer Passport only. Use the separate seller session and grant handoff above to submit an offer; this button does not impersonate a seller or generate seller evidence. Existing audit records are not deleted.
 6. PayPal checkout is available only if the server evaluation returns `APPROVE` and PayPal sandbox configuration is present.
 
 ## Prototype limitations
 
-Buyer and seller identity and Passport ownership are not authenticated. No trusted evidence verifier exists, so seller uploads cannot satisfy condition evidence requirements. They remain unresolved and checkout is blocked; MIRROR does not fabricate a verified `REJECT` or `APPROVE` outcome. A real trusted verifier is needed to demonstrate those outcomes. PayPal currently charges the displayed offer amount; shipping, taxes, and additional disclosed charges are not modeled. This is a controlled hackathon prototype, not production-ready multi-user software.
+Sessions and Passport ownership are enforced for application routes, but account registration does not verify email ownership or real-world buyer/seller identity. There is no password recovery, email verification, or authentication rate limiting. Historical Passports/offers remain unowned and cannot be claimed through the API. Channel3 can support only product title/identity, unambiguous brand/model, and explicitly returned technical specifications (processor family, display resolution, operating system, RAM, and storage capacity with matching units). The provider response does not establish that the seller's physical item is the catalogue item. Price, delivery, warranty, physical condition, return terms, seller reliability, and fulfilment remain unresolved unless a suitable independent verifier is added. Seller uploads alone cannot satisfy conditions. PayPal currently charges the displayed offer amount; shipping, taxes, and additional disclosed charges are not modeled. This is a controlled prototype, not production-ready multi-user software.

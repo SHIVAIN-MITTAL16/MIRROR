@@ -9,8 +9,48 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from backend.test_auth_client import AuthenticatedTestClient
 
 from backend.main import APP
+
+
+class SyntheticTestVerifier:
+    """Test-only verifier for labelled synthetic fixtures; never imported by production."""
+
+    IDENTITY = "test-only:SyntheticTestVerifier"
+    VERSION = "unittest-1"
+
+    @classmethod
+    def verify(cls, db, evidence_id, claim_type, claim_value, unit=None):
+        evidence = db.execute(
+            "SELECT lifecycle_state,is_simulated FROM evidence_items WHERE id=?", (evidence_id,)
+        ).fetchone()
+        if evidence is None or evidence[0] != "raw" or evidence[1]:
+            raise AssertionError("test verifier accepts only raw synthetic test evidence")
+        event_id = f"event-{evidence_id}"
+        timestamp = "2026-01-01T00:00:00+00:00"
+        proves = [{"type": claim_type, "value": str(claim_value), "unit": unit}]
+        db.execute("""
+            INSERT INTO evidence_verification_events
+            (event_id,evidence_id,from_state,to_state,actor_type,verifier_identity,
+             verifier_version,method,recorded_at,proves_json,does_not_prove_json,reason)
+            VALUES(?,?, 'raw','verified','server_verifier',?,?,'synthetic_test_fixture',?,?,?,?)
+        """, (
+            event_id, evidence_id, cls.IDENTITY, cls.VERSION, timestamp,
+            json.dumps(proves),
+            json.dumps(["seller identity", "real-world source authenticity", "future fulfilment"]),
+            "Deterministic synthetic test fixture only; not a production verification.",
+        ))
+        db.execute("""
+            UPDATE evidence_items SET lifecycle_state='verified',verification_status='verified'
+            WHERE id=?
+        """, (evidence_id,))
+        db.execute("""
+            INSERT INTO evidence_claims
+            (claim_id,evidence_id,verification_event_id,claim_type,claim_value,unit,created_at)
+            VALUES(?,?,?,?,?,?,?)
+        """, (f"claim-{evidence_id}", evidence_id, event_id, claim_type,
+              str(claim_value), unit, timestamp))
 
 
 @contextmanager
@@ -29,7 +69,7 @@ class PassportDecisionTests(unittest.TestCase):
         cls.temp_dir = tempfile.TemporaryDirectory()
         cls.old_database_path = os.environ.get("MIRROR_DATABASE_PATH")
         os.environ["MIRROR_DATABASE_PATH"] = str(Path(cls.temp_dir.name) / "decision.sqlite3")
-        cls.client = TestClient(APP)
+        cls.client = AuthenticatedTestClient(APP)
         cls.client.__enter__()
 
     @classmethod
@@ -83,42 +123,36 @@ class PassportDecisionTests(unittest.TestCase):
             verification_state = "verified" if status == "verified" and not simulated else (
                 "simulated" if simulated else "unverified"
             )
-            lifecycle_state = "simulated" if simulated else verification_state
+            initial_status = "simulated" if simulated else (
+                "unverified" if status == "verified" else status
+            )
+            lifecycle_state = "simulated" if simulated else "raw"
             db.execute("""
                 INSERT INTO evidence_items
                 (id, passport_id, evidence_type, source_name, source_reference,
                  captured_value, verification_status, captured_at, is_simulated,
                  original_content,content_type,received_at,source_classification,
                  content_sha256,lifecycle_state)
-                VALUES (?, ?, 'listing_field', 'test_fixture', NULL, ?, ?,
+                VALUES (?, ?, 'listing_field', 'SYNTHETIC_TEST_ONLY', NULL, ?, ?,
                         '2026-01-01T00:00:00+00:00', ?, ?, 'text/plain',
-                        '2026-01-01T00:00:00+00:00', 'server_source', 'fixture', ?)
+                        '2026-01-01T00:00:00+00:00', 'client_submitted', 'fixture', ?)
             """, (
-                evidence_id, passport_id, str(value), status, int(simulated),
+                evidence_id, passport_id, str(value), initial_status, int(simulated),
                 str(value), lifecycle_state,
             ))
-            event_id = f"event-{evidence_id}"
-            db.execute("""
-                INSERT INTO evidence_verification_events
-                (event_id,evidence_id,to_state,actor_type,method,recorded_at,
-                 proves_json,does_not_prove_json,reason)
-                VALUES(?,?,?,'server_verifier','test_fixture',?,?, '[]','test setup')
-            """, (
-                event_id, evidence_id, verification_state, "2026-01-01T00:00:00+00:00",
-                json.dumps([{"type": condition_type, "value": str(value)}])
-                if verification_state == "verified" else "[]",
-            ))
-            claim_id = None
             if verification_state == "verified":
-                claim_id = f"claim-{evidence_id}"
+                SyntheticTestVerifier.verify(db, evidence_id, condition_type, value)
+            else:
+                event_id = f"event-{evidence_id}"
                 db.execute("""
-                    INSERT INTO evidence_claims
-                    (claim_id,evidence_id,verification_event_id,claim_type,claim_value,created_at)
-                    VALUES(?,?,?,?,?,?)
-                """, (
-                    claim_id, evidence_id, event_id, condition_type, str(value),
-                    "2026-01-01T00:00:00+00:00",
-                ))
+                    INSERT INTO evidence_verification_events
+                    (event_id,evidence_id,from_state,to_state,actor_type,method,recorded_at,
+                     proves_json,does_not_prove_json,reason)
+                    VALUES(?,?,NULL,?,'system','synthetic_test_fixture',?,'[]',?,'Synthetic fixture only.')
+                """, (event_id, evidence_id, verification_state,
+                      "2026-01-01T00:00:00+00:00",
+                      json.dumps(["No real-world evidence is established by this test fixture."])))
+            claim_id = f"claim-{evidence_id}" if verification_state == "verified" else None
             db.execute(
                 "INSERT INTO condition_evidence(condition_id, evidence_id, claim_id) VALUES (?, ?, ?)",
                 (condition_id, evidence_id, claim_id),
@@ -319,7 +353,12 @@ class PassportDecisionTests(unittest.TestCase):
             with sqlite_connection(db_path) as db:
                 migrated_evidence = db.execute("SELECT is_simulated FROM evidence_items WHERE id='legacy-evidence'").fetchone()[0]
                 links = db.execute("SELECT COUNT(*) FROM condition_evidence").fetchone()[0]
-            response = self.client.post(f"/api/passports/{passport_id}/evaluate")
+            anonymous_owner = TestClient(APP)
+            with anonymous_owner:
+                anonymous_owner.post("/api/auth/register", json={
+                    "email": "legacy-reader@example.test", "password": "LegacyReaderPassword#2060", "role": "buyer",
+                })
+                response = anonymous_owner.get(f"/api/passports/{passport_id}")
         finally:
             if previous_path is None:
                 os.environ.pop("MIRROR_DATABASE_PATH", None)
@@ -328,10 +367,7 @@ class PassportDecisionTests(unittest.TestCase):
 
         self.assertEqual(migrated_evidence, 1)
         self.assertEqual(links, 0)
-        self.assertEqual(response.status_code, 200, response.text)
-        result = response.json()
-        self.assertEqual(result["outcome"], "ESCALATE")
-        self.assertIn("evidence_missing_or_unlinked", result["unresolved_conditions"][0]["reasons"])
+        self.assertEqual(response.status_code, 404, response.text)
 
     def test_ml_only_runs_with_explicit_passed_structured_features_and_can_only_escalate(self):
         passport_id = self.create_passport()

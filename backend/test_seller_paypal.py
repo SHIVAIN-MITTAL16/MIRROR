@@ -1,15 +1,98 @@
 import os
+import json
 import tempfile
 import unittest
+import json
 from pathlib import Path
 from unittest.mock import patch
+from urllib.request import Request as URLRequest
 
 from fastapi.testclient import TestClient
+from backend.test_auth_client import AuthenticatedTestClient
 
 from backend.ai_app import APP
 from backend.passports import connect, initialize_database
 from backend.passport_decision import PassportDecision
 from backend import paypal
+
+
+class SyntheticTestVerifier:
+    """Test-only verifier for synthetic seller declarations; absent from runtime modules."""
+
+    IDENTITY = "test-only:SyntheticTestVerifier"
+    VERSION = "unittest-1"
+
+    @classmethod
+    def verify_offer_evidence(cls, evidence_id, condition_type, condition_value, unit):
+        """Create separate, labelled synthetic evidence with explicit claim links."""
+        with connect() as db:
+            evidence = db.execute("""
+                SELECT lifecycle_state,is_simulated,source_classification,offer_snapshot_id,
+                       passport_id,captured_value
+                FROM evidence_items WHERE id=?
+            """, (evidence_id,)).fetchone()
+            if (evidence is None or evidence["lifecycle_state"] != "raw"
+                    or evidence["is_simulated"] or evidence["source_classification"] != "client_submitted"
+                    or not evidence["offer_snapshot_id"]):
+                raise AssertionError("test verifier accepts only raw, non-simulated synthetic offer evidence")
+            seller_condition = db.execute("""
+                SELECT id,buyer_condition_id FROM purchase_conditions
+                WHERE owner='merchant' AND offer_snapshot_id=?
+            """, (evidence["offer_snapshot_id"],)).fetchone()
+            if seller_condition is None:
+                raise AssertionError("synthetic verifier requires a persisted seller condition")
+            synthetic_id = f"synthetic-{evidence_id}"
+            ingestion_event_id = f"test-ingest-{evidence_id}"
+            event_id = f"test-verify-{evidence_id}"
+            recorded_at = "2026-01-01T00:00:00+00:00"
+            proves = [{"type": condition_type, "value": str(condition_value), "unit": unit}]
+            db.execute("""
+                INSERT INTO evidence_items
+                (id,passport_id,evidence_type,source_name,captured_value,verification_status,
+                 captured_at,is_simulated,original_content,content_type,received_at,
+                 source_classification,content_sha256,offer_snapshot_id,lifecycle_state)
+                VALUES(?,?, 'synthetic_test_only', ?, ?, 'unverified', ?, 0, ?,
+                       'text/plain', ?, 'server_source', ?, ?, 'raw')
+            """, (synthetic_id, evidence["passport_id"], cls.IDENTITY,
+                  str(condition_value), recorded_at, str(condition_value), recorded_at,
+                  f"synthetic-test-digest-{synthetic_id}", evidence["offer_snapshot_id"]))
+            db.execute("""
+                INSERT INTO evidence_verification_events
+                (event_id,evidence_id,from_state,to_state,actor_type,actor_reference,
+                 method,recorded_at,proves_json,does_not_prove_json,reason)
+                VALUES(?,?,NULL,'raw','system',?,'synthetic_test_ingestion',?,'[]',?,'Test-only synthetic fixture.')
+            """, (ingestion_event_id, synthetic_id, evidence["offer_snapshot_id"], recorded_at,
+                  json.dumps(["This synthetic fixture does not establish real-world product or seller facts."])))
+            db.execute("""
+                INSERT INTO evidence_verification_events
+                (event_id,evidence_id,from_state,to_state,actor_type,actor_reference,
+                 verifier_identity,verifier_version,method,recorded_at,proves_json,
+                 does_not_prove_json,reason)
+                VALUES(?,?,'raw','verified','server_verifier',?,?,?, 'synthetic_test_fixture',?,?,?,?)
+            """, (
+                event_id, synthetic_id, evidence["offer_snapshot_id"], cls.IDENTITY,
+                cls.VERSION, recorded_at,
+                json.dumps(proves),
+                json.dumps(["seller identity", "source authenticity", "future delivery or fulfilment"]),
+                "Test-only deterministic synthetic evidence; not a production verification.",
+            ))
+            db.execute("""
+                UPDATE evidence_items SET lifecycle_state='verified',verification_status='verified'
+                WHERE id=?
+            """, (synthetic_id,))
+            db.execute("""
+                INSERT INTO evidence_claims
+                (claim_id,evidence_id,verification_event_id,claim_type,claim_value,unit,created_at)
+                VALUES(?,?,?,?,?,?,?)
+            """, (
+                f"test-claim-{evidence_id}", synthetic_id, event_id, condition_type,
+                str(condition_value), unit, recorded_at,
+            ))
+            for condition_id in (seller_condition["buyer_condition_id"], seller_condition["id"]):
+                db.execute("""
+                    INSERT INTO condition_evidence(condition_id,evidence_id,claim_id)
+                    VALUES(?,?,?)
+                """, (condition_id, synthetic_id, f"test-claim-{evidence_id}"))
 
 
 class SellerOfferAndPayPalTests(unittest.TestCase):
@@ -18,7 +101,7 @@ class SellerOfferAndPayPalTests(unittest.TestCase):
         self.old_path = os.environ.get("MIRROR_DATABASE_PATH")
         os.environ["MIRROR_DATABASE_PATH"] = str(Path(self.temp_dir.name) / "test.sqlite3")
         initialize_database()
-        self.client = TestClient(APP)
+        self.client = AuthenticatedTestClient(APP)
         self.client.__enter__()
 
     def tearDown(self):
@@ -56,6 +139,86 @@ class SellerOfferAndPayPalTests(unittest.TestCase):
                 "evidence_content": "Seller declaration: price is 120 USD.",
             }],
         }
+
+    def test_paypal_oauth_builds_expected_urllib_request(self):
+        class FakeResponse:
+            status = 200
+            headers = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self, limit):
+                return json.dumps({"access_token": "mock-access-token"}).encode()
+
+        config = {
+            "client_id": "mock-client-id",
+            "client_secret": "mock-client-secret",
+            "base_url": "https://api-m.sandbox.paypal.com",
+            "configured": True,
+        }
+        with patch("backend.paypal.urlopen", return_value=FakeResponse()) as request_call:
+            token = paypal._request_access_token(config)
+
+        self.assertEqual(token, "mock-access-token")
+        request = request_call.call_args.args[0]
+        self.assertIsInstance(request, URLRequest)
+        self.assertEqual(request.full_url, "https://api-m.sandbox.paypal.com/v1/oauth2/token")
+        self.assertEqual(request.get_method(), "POST")
+        self.assertTrue(request.get_header("Authorization").startswith("Basic "))
+        self.assertEqual(request_call.call_args.kwargs["timeout"], 45)
+
+    def test_synthetic_test_verifier_supports_real_approve_and_paypal_order_gate(self):
+        passport_response = self.client.post("/api/passports/confirm-intent", json={
+            "buyer_intent": "A camera under 150 USD.",
+            "currency": "USD",
+            "buyer_acknowledged": True,
+            "conditions": [{
+                "condition_type": "price", "operator": "lte", "expected_value": "150",
+                "unit": "USD", "hard_or_soft": "hard", "supporting_quote": "under 150 USD",
+            }],
+        })
+        self.assertEqual(passport_response.status_code, 201, passport_response.text)
+        passport = passport_response.json()
+        offer_payload = self.seller_offer_payload(passport)
+        offer_payload["conditions"][0].update({"seller_confirms": True, "seller_value": "120"})
+        offer = self.client.post(
+            f"/api/passports/{passport['id']}/offers", json=offer_payload
+        )
+        self.assertEqual(offer.status_code, 201, offer.text)
+        offer = offer.json()
+        seller_condition = offer["conditions"][0]
+        self.assertTrue(seller_condition["merchant_confirmed"])
+        evidence = seller_condition["evidence"][0]
+        self.assertEqual(evidence["lifecycle_state"], "raw")
+        self.assertEqual(evidence["source_classification"], "client_submitted")
+
+        SyntheticTestVerifier.verify_offer_evidence(
+            evidence["id"], "price", "120", "USD"
+        )
+        evaluation = self.client.post(
+            f"/api/passports/{passport['id']}/evaluate?offer_id={offer['id']}"
+        )
+        self.assertEqual(evaluation.status_code, 200, evaluation.text)
+        self.assertEqual(evaluation.json()["outcome"], "APPROVE", evaluation.text)
+        self.assertEqual(len(evaluation.json()["passed_conditions"]), 2)
+
+        provider_order = {
+            "id": "ORDER-TEST-APPROVED", "status": "CREATED",
+            "purchase_units": [{"amount": {"currency_code": "USD", "value": "120.00"}}],
+        }
+        with patch.dict(os.environ, {
+            "PAYPAL_CLIENT_ID": "test-id", "PAYPAL_CLIENT_SECRET": "test-secret",
+        }), patch("backend.paypal.create_paypal_order", return_value=provider_order) as provider:
+            response = self.client.post(
+                f"/api/passports/{passport['id']}/paypal/order", json={"offer_id": offer["id"]}
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["order_id"], "ORDER-TEST-APPROVED")
+        provider.assert_called_once()
 
     def test_seller_offer_persists_raw_evidence_and_evaluation_escalates(self):
         passport = self.make_passport()
@@ -119,9 +282,14 @@ class SellerOfferAndPayPalTests(unittest.TestCase):
             "PAYPAL_CLIENT_ID": "test-client-id",
             "PAYPAL_CLIENT_SECRET": "test-client-secret",
         }, clear=False), patch("backend.paypal.create_paypal_order") as provider:
+            forged = self.client.post(
+                f"/api/passports/{passport['id']}/paypal/order",
+                json={"offer_id": offer["id"], "outcome": "APPROVE"},
+            )
             response = self.client.post(
                 f"/api/passports/{passport['id']}/paypal/order", json={"offer_id": offer["id"]}
             )
+        self.assertEqual(forged.status_code, 422, forged.text)
         self.assertEqual(response.status_code, 409, response.text)
         self.assertEqual(response.json()["detail"]["outcome"], "ESCALATE")
         provider.assert_not_called()

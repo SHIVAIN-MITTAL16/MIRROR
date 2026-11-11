@@ -8,9 +8,10 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from backend.test_auth_client import AuthenticatedTestClient
 
 from backend.main import APP
-from backend.passports import initialize_database
+from backend.passports import connect, evaluate_passport_state, initialize_database
 
 
 @contextmanager
@@ -29,7 +30,7 @@ class EvidenceIngestionTests(unittest.TestCase):
         cls.temp_dir = tempfile.TemporaryDirectory()
         cls.old_database_path = os.environ.get("MIRROR_DATABASE_PATH")
         os.environ["MIRROR_DATABASE_PATH"] = str(Path(cls.temp_dir.name) / "evidence.sqlite3")
-        cls.client = TestClient(APP)
+        cls.client = AuthenticatedTestClient(APP)
         cls.client.__enter__()
 
     @classmethod
@@ -130,6 +131,19 @@ class EvidenceIngestionTests(unittest.TestCase):
         self.assertEqual(response.json()["claimed_source_reference"], "http://127.0.0.1:1/private")
         self.assertEqual(response.json()["verification_status"], "unverified")
 
+    def test_verification_has_no_public_api_route(self):
+        public_paths = set(APP.openapi()["paths"])
+        # The dedicated server-side Channel3 adapter is the sole verifier.
+        # There is no generic client route for changing verification state.
+        self.assertIn(
+            "/api/passports/{passport_id}/offers/{offer_id}/catalogue-verification",
+            public_paths,
+        )
+        self.assertFalse(any(
+            path.lower().endswith("/verify") or "/verification/" in path.lower()
+            for path in public_paths
+        ))
+
     def test_retrieval_hides_content_by_default_and_returns_links_claims_and_history(self):
         passport_id = self.create_passport()
         condition_id = self.add_condition(passport_id)
@@ -193,16 +207,22 @@ class EvidenceIngestionTests(unittest.TestCase):
                 (id,passport_id,evidence_type,source_name,captured_value,verification_status,
                  captured_at,is_simulated,original_content,content_type,received_at,
                  source_classification,content_sha256,lifecycle_state)
-                VALUES(?,?,'trusted_listing','test_verifier','20','verified',
+                VALUES(?,?,'trusted_listing','SYNTHETIC_TEST_ONLY','20','unverified',
                        '2026-01-01T00:00:00Z',0,'Price shown: 20','text/plain',
-                       '2026-01-01T00:00:00Z','server_source','test-digest','verified')
+                       '2026-01-01T00:00:00Z','client_submitted','test-digest','raw')
             """, (trusted_evidence_id, passport_id))
             db.execute("""
                 INSERT INTO evidence_verification_events
-                (event_id,evidence_id,to_state,actor_type,method,recorded_at,proves_json,does_not_prove_json,reason)
-                VALUES(?,?,'verified','server_verifier','test_scope','2026-01-01T00:00:00Z',?,?,?)
-            """, (event_id, trusted_evidence_id, json.dumps([{"type": "price", "value": "20"}]),
+                (event_id,evidence_id,from_state,to_state,actor_type,verifier_identity,
+                 verifier_version,method,recorded_at,proves_json,does_not_prove_json,reason)
+                VALUES(?,?,'raw','verified','server_verifier','test-only:scope-fixture',
+                       'unittest-1','synthetic_test_fixture','2026-01-01T00:00:00Z',?,?,?)
+            """, (event_id, trusted_evidence_id, json.dumps([{"type": "price", "value": "20", "unit": None}]),
                   json.dumps(["Delivery timing was not established."]), "Test verifier scope"))
+            db.execute("""
+                UPDATE evidence_items SET lifecycle_state='verified',verification_status='verified'
+                WHERE id=?
+            """, (trusted_evidence_id,))
             db.execute("""
                 INSERT INTO evidence_claims
                 (claim_id,evidence_id,verification_event_id,claim_type,claim_value,created_at)
@@ -245,14 +265,20 @@ class EvidenceIngestionTests(unittest.TestCase):
                 INSERT INTO evidence_items
                 (id,passport_id,evidence_type,source_name,captured_value,verification_status,
                  captured_at,is_simulated,lifecycle_state)
-                VALUES(?,?,'test','test','20','verified','2026-01-01T00:00:00Z',0,'verified')
+                VALUES(?,?,'test','SYNTHETIC_TEST_ONLY','20','unverified','2026-01-01T00:00:00Z',0,'raw')
             """, (trusted_evidence_id, passport_id))
             db.execute("""
                 INSERT INTO evidence_verification_events
-                (event_id,evidence_id,to_state,actor_type,method,recorded_at,proves_json,reason)
-                VALUES(?,?,'verified','server_verifier','test','2026-01-01T00:00:00Z',?, 'test fixture')
+                (event_id,evidence_id,from_state,to_state,actor_type,verifier_identity,
+                 verifier_version,method,recorded_at,proves_json,does_not_prove_json,reason)
+                VALUES(?,?,'raw','verified','server_verifier','test-only:append-only-fixture',
+                       'unittest-1','synthetic_test_fixture','2026-01-01T00:00:00Z',?, '[]', 'test fixture')
             """, (verified_event_id, trusted_evidence_id,
-                  json.dumps([{"type": "price", "value": "20"}])))
+                  json.dumps([{"type": "price", "value": "20", "unit": None}])))
+            db.execute("""
+                UPDATE evidence_items SET lifecycle_state='verified',verification_status='verified'
+                WHERE id=?
+            """, (trusted_evidence_id,))
             db.execute("""
                 INSERT INTO evidence_claims
                 (claim_id,evidence_id,verification_event_id,claim_type,claim_value,created_at)
@@ -314,6 +340,18 @@ class EvidenceIngestionTests(unittest.TestCase):
             ).fetchone()
             self.assertEqual(tuple(row), ("raw", "unverified"))
 
+    def test_direct_insert_cannot_start_as_verified(self):
+        passport_id = self.create_passport()
+        with sqlite_connection(os.environ["MIRROR_DATABASE_PATH"]) as db:
+            with self.assertRaises(sqlite3.IntegrityError):
+                db.execute("""
+                    INSERT INTO evidence_items
+                    (id,passport_id,evidence_type,source_name,captured_value,verification_status,
+                     captured_at,is_simulated,lifecycle_state)
+                    VALUES('forged-verified',?,'test','test','20','verified',
+                           '2026-01-01T00:00:00Z',0,'verified')
+                """, (passport_id,))
+
     def test_legacy_evidence_and_relationship_migrate_without_claims(self):
         db_path = Path(self.temp_dir.name) / "legacy-evidence.sqlite3"
         passport_id, condition_id, evidence_id = "legacy-p", "legacy-c", "legacy-e"
@@ -362,15 +400,16 @@ class EvidenceIngestionTests(unittest.TestCase):
                 self.assertEqual(db.execute("SELECT COUNT(*) FROM evidence_claims").fetchone()[0], 0)
                 self.assertEqual(db.execute("SELECT lifecycle_state FROM evidence_items WHERE id=?", (evidence_id,)).fetchone()[0], "unverified")
                 self.assertEqual(db.execute("SELECT COUNT(*) FROM evidence_verification_events WHERE evidence_id=?", (evidence_id,)).fetchone()[0], 1)
-            decision = self.client.post(f"/api/passports/{passport_id}/evaluate").json()
+            with connect() as db:
+                decision = evaluate_passport_state(db, passport_id)
         finally:
             if previous_path is None:
                 os.environ.pop("MIRROR_DATABASE_PATH", None)
             else:
                 os.environ["MIRROR_DATABASE_PATH"] = previous_path
-        self.assertEqual(decision["outcome"], "ESCALATE")
-        condition_result = next(item for item in decision["unresolved_conditions"] if item["condition_id"] == condition_id)
-        self.assertIn("evidence_missing_or_unlinked", condition_result["reasons"])
+        self.assertEqual(decision.outcome, "ESCALATE")
+        condition_result = next(item for item in decision.unresolved_conditions if item.condition_id == condition_id)
+        self.assertIn("evidence_not_verified", condition_result.reasons)
 
 
 if __name__ == "__main__":

@@ -511,6 +511,18 @@ def validate_model_extraction(text: str, extracted: _ModelExtraction) -> IntentE
                 continue
             else:
                 normalized_unit = "days"
+        elif kind in {"ram", "storage_capacity"}:
+            unit_match = re.search(r"\b(GB|GIB|TB|TIB)\b", quote, re.IGNORECASE)
+            if unit_match is None:
+                normalized_unit = None
+                _add_question(questions, f'Please clarify the capacity unit for "{quote}".')
+            else:
+                source_unit = unit_match.group(1).upper()
+                canonical_unit = {"GIB": "GiB", "TIB": "TiB"}.get(source_unit, source_unit)
+                if normalized_unit and normalized_unit.casefold() != canonical_unit.casefold():
+                    _add_question(questions, f'Please confirm the capacity unit for "{quote}"; MIRROR will not convert units.')
+                    continue
+                normalized_unit = canonical_unit
         elif normalized_unit:
             if normalized_unit.casefold() not in quote.casefold():
                 _add_question(questions, f"Please clarify the unit for “{quote}”; it was not present in that exact text.")

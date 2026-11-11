@@ -3,15 +3,16 @@
 import os
 import hashlib
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Body, HTTPException, Query, Request
+from fastapi import APIRouter, Body, HTTPException, Query, Request, Depends
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from backend.passport_decision import (
     CONDITION_TYPES, NUMERIC_TYPES, NUMERIC_OPERATORS, TEXT_OPERATORS,
@@ -62,7 +63,8 @@ def initialize_database() -> None:
             paypal_capture_request_id TEXT,
             paypal_amount TEXT,
             paypal_currency TEXT,
-            paypal_capture_id TEXT
+            paypal_capture_id TEXT,
+            buyer_user_id TEXT REFERENCES auth_users(id)
         );
         CREATE TABLE IF NOT EXISTS purchase_conditions (
             id TEXT PRIMARY KEY,
@@ -88,7 +90,8 @@ def initialize_database() -> None:
             currency TEXT NOT NULL CHECK(length(currency) = 3 AND currency = upper(currency)),
             delivery_promise TEXT,
             return_terms TEXT,
-            captured_at TEXT NOT NULL
+            captured_at TEXT NOT NULL,
+            seller_user_id TEXT REFERENCES auth_users(id)
         );
         CREATE TABLE IF NOT EXISTS evidence_items (
             id TEXT PRIMARY KEY,
@@ -151,6 +154,42 @@ def initialize_database() -> None:
             evidence_id TEXT NOT NULL REFERENCES evidence_items(id),
             PRIMARY KEY(dispute_id,evidence_id)
         );
+        CREATE TABLE IF NOT EXISTS auth_users (
+            id TEXT PRIMARY KEY,
+            email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('buyer','seller')),
+            created_at TEXT NOT NULL,
+            disabled_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS seller_accounts (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL UNIQUE REFERENCES auth_users(id),
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS auth_sessions (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
+            token_hash TEXT NOT NULL UNIQUE,
+            csrf_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            revoked_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id,expires_at);
+        CREATE TABLE IF NOT EXISTS passport_seller_grants (
+            id TEXT PRIMARY KEY,
+            passport_id TEXT NOT NULL REFERENCES purchase_passports(id) ON DELETE CASCADE,
+            buyer_user_id TEXT NOT NULL REFERENCES auth_users(id),
+            seller_id TEXT NOT NULL REFERENCES seller_accounts(id),
+            status TEXT NOT NULL CHECK(status IN ('pending','accepted','revoked','expired')),
+            created_at TEXT NOT NULL,
+            accepted_at TEXT,
+            revoked_at TEXT,
+            expires_at TEXT NOT NULL,
+            UNIQUE(passport_id,seller_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_seller_grants_seller ON passport_seller_grants(seller_id,status,expires_at);
         CREATE INDEX IF NOT EXISTS idx_conditions_passport ON purchase_conditions(passport_id);
         CREATE INDEX IF NOT EXISTS idx_passports_created ON purchase_passports(created_at);
         CREATE INDEX IF NOT EXISTS idx_evidence_passport ON evidence_items(passport_id);
@@ -280,6 +319,11 @@ def initialize_database() -> None:
         for column, definition in passport_migrations.items():
             if column not in passport_columns:
                 db.execute(f"ALTER TABLE purchase_passports ADD COLUMN {column} {definition}")
+        if "buyer_user_id" not in passport_columns:
+            db.execute("ALTER TABLE purchase_passports ADD COLUMN buyer_user_id TEXT REFERENCES auth_users(id)")
+        offer_columns = {row["name"] for row in db.execute("PRAGMA table_info(offer_snapshots)")}
+        if "seller_user_id" not in offer_columns:
+            db.execute("ALTER TABLE offer_snapshots ADD COLUMN seller_user_id TEXT REFERENCES auth_users(id)")
         evidence_columns = {row["name"] for row in db.execute("PRAGMA table_info(evidence_items)")}
         evidence_migrations = {
             "original_content": "TEXT",
@@ -347,6 +391,37 @@ def initialize_database() -> None:
         BEGIN
             SELECT RAISE(ABORT, 'condition, evidence and claim scope must match');
         END;
+        CREATE TRIGGER IF NOT EXISTS validate_passport_seller_grant
+        BEFORE INSERT ON passport_seller_grants
+        WHEN COALESCE((SELECT buyer_user_id FROM purchase_passports WHERE id=NEW.passport_id),'') != NEW.buyer_user_id
+          OR COALESCE((SELECT user_id FROM seller_accounts WHERE id=NEW.seller_id),'') = NEW.buyer_user_id
+        BEGIN SELECT RAISE(ABORT, 'seller grant must match Passport owner and another registered seller'); END;
+        CREATE TRIGGER IF NOT EXISTS validate_offer_seller_grant
+        BEFORE INSERT ON offer_snapshots
+        WHEN NEW.seller_user_id IS NULL OR NOT EXISTS (
+            SELECT 1 FROM seller_accounts s JOIN passport_seller_grants g ON g.seller_id=s.id
+            WHERE s.user_id=NEW.seller_user_id AND g.passport_id=NEW.passport_id
+              AND g.status='accepted' AND g.revoked_at IS NULL AND g.expires_at>NEW.captured_at
+        )
+        BEGIN SELECT RAISE(ABORT, 'offer requires an active accepted Passport seller grant'); END;
+        CREATE TRIGGER IF NOT EXISTS offer_seller_immutable
+        BEFORE UPDATE OF seller_user_id ON offer_snapshots
+        WHEN NEW.seller_user_id IS NOT OLD.seller_user_id
+        BEGIN SELECT RAISE(ABORT, 'offer seller ownership is immutable'); END;
+        CREATE TRIGGER IF NOT EXISTS offer_passport_immutable
+        BEFORE UPDATE OF passport_id ON offer_snapshots
+        WHEN NEW.passport_id IS NOT OLD.passport_id
+        BEGIN SELECT RAISE(ABORT, 'offer Passport ownership is immutable'); END;
+        CREATE TRIGGER IF NOT EXISTS passport_buyer_immutable
+        BEFORE UPDATE OF buyer_user_id ON purchase_passports
+        WHEN NEW.buyer_user_id IS NOT OLD.buyer_user_id
+        BEGIN SELECT RAISE(ABORT, 'Passport buyer ownership is immutable'); END;
+        CREATE TRIGGER IF NOT EXISTS seller_grant_identity_immutable
+        BEFORE UPDATE OF passport_id,buyer_user_id,seller_id ON passport_seller_grants
+        WHEN NEW.passport_id IS NOT OLD.passport_id
+          OR NEW.buyer_user_id IS NOT OLD.buyer_user_id
+          OR NEW.seller_id IS NOT OLD.seller_id
+        BEGIN SELECT RAISE(ABORT, 'seller grant identity and scope are immutable'); END;
         CREATE TRIGGER IF NOT EXISTS validate_merchant_offer_condition
         BEFORE INSERT ON purchase_conditions
         WHEN NEW.offer_snapshot_id IS NOT NULL AND (
@@ -439,6 +514,12 @@ def initialize_database() -> None:
           )
         BEGIN
             SELECT RAISE(ABORT, 'evidence claims require a matching verified event and claim scope');
+        END;
+        CREATE TRIGGER IF NOT EXISTS evidence_items_no_verified_insert
+        BEFORE INSERT ON evidence_items
+        WHEN NEW.lifecycle_state = 'verified' OR NEW.verification_status = 'verified'
+        BEGIN
+            SELECT RAISE(ABORT, 'evidence must be ingested before it can be verified');
         END;
         """)
 
@@ -537,6 +618,11 @@ class SellerOfferCreate(BaseModel):
         return self
 
 
+class SellerGrantCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    seller_id: str = Field(min_length=1, max_length=64)
+
+
 class EvidenceRead(BaseModel):
     id: str
     passport_id: str
@@ -554,6 +640,7 @@ class EvidenceRead(BaseModel):
     description: str | None
     lifecycle_state: str
     verification_status: str
+    assurance_category: str
     is_simulated: bool
     associated_conditions: list[dict]
     claims: list[dict]
@@ -683,6 +770,8 @@ class ConfirmIntentRequest(BaseModel):
                     raise ValueError("numeric condition expected_value is invalid")
                 if condition.condition_type in {"quantity", "delivery_days"} and value != value.to_integral_value():
                     raise ValueError(f"{condition.condition_type} must be a whole number")
+            if condition.condition_type in {"ram", "storage_capacity"} and condition.unit not in {"GB", "GiB", "TB", "TiB"}:
+                raise ValueError(f"{condition.condition_type} requires an explicit GB, GiB, TB or TiB unit")
             if condition.condition_type == "price" and condition.unit != self.currency:
                 raise ValueError("price condition unit must match Passport currency")
 
@@ -748,7 +837,10 @@ class PassportRead(BaseModel):
     conditions: list[ConditionRead]
 
 
-router = APIRouter(prefix="/api/passports", tags=["Purchase Passports"])
+from backend.auth import require_authenticated, require_role, seller_grants_for_passport
+
+router = APIRouter(prefix="/api/passports", tags=["Purchase Passports"], dependencies=[Depends(require_authenticated)])
+seller_router = APIRouter(prefix="/api/seller", tags=["Seller access"], dependencies=[Depends(require_authenticated)])
 
 
 def passport_record(db: sqlite3.Connection, passport_id: str) -> dict | None:
@@ -831,11 +923,28 @@ def evidence_record(db: sqlite3.Connection, passport_id: str, evidence_id: str, 
         WHERE c.evidence_id = ?
         ORDER BY c.created_at, c.rowid
     """, (evidence_id,)).fetchall()]
+    if result["evidence_type"] == "seller_offer_text":
+        result["assurance_category"] = "seller_declared_commitment"
+    elif result["evidence_type"] == "channel3_product_catalogue":
+        try:
+            captured_at = datetime.fromisoformat(str(result["captured_at"]).replace("Z", "+00:00"))
+            stale = captured_at.tzinfo is None or datetime.now(timezone.utc) - captured_at.astimezone(timezone.utc) > timedelta(days=30)
+        except (TypeError, ValueError):
+            stale = True
+        result["assurance_category"] = "stale_catalogue_fact" if stale else (
+            "independently_verified_catalogue_fact"
+            if result["lifecycle_state"] == "verified" and result["claims"] else "unsupported_claim"
+        )
+    elif result["lifecycle_state"] != "verified":
+        result["assurance_category"] = "unverified_evidence"
+    else:
+        result["assurance_category"] = "verified_evidence"
     history = []
     limitations = []
     for event in db.execute("""
         SELECT event_id, from_state, to_state, actor_type, actor_reference,
-               method, recorded_at, proves_json, does_not_prove_json, reason
+               verifier_identity, verifier_version, method, recorded_at,
+               proves_json, does_not_prove_json, reason
         FROM evidence_verification_events
         WHERE evidence_id = ? ORDER BY recorded_at, rowid
     """, (evidence_id,)).fetchall():
@@ -849,27 +958,133 @@ def evidence_record(db: sqlite3.Connection, passport_id: str, evidence_id: str, 
     return result
 
 
+def require_buyer_passport(db: sqlite3.Connection, passport_id: str, user: dict):
+    if user.get("role") != "buyer":
+        raise HTTPException(status_code=403, detail="Buyer role required")
+    row = db.execute("SELECT * FROM purchase_passports WHERE id=? AND buyer_user_id=?", (passport_id, user["id"])).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Passport not found")
+    return row
+
+
+def require_seller_grant(db: sqlite3.Connection, passport_id: str, user: dict):
+    if user.get("role") != "seller" or not user.get("seller_id"):
+        raise HTTPException(status_code=403, detail="Seller role required")
+    if not seller_grants_for_passport(db, passport_id, user["seller_id"]):
+        raise HTTPException(status_code=404, detail="Passport access is not available")
+
+
+@router.post("/{passport_id}/seller-grants", status_code=201)
+def create_seller_grant(passport_id: str, payload: SellerGrantCreate, request: Request):
+    user = request.state.user
+    grant_id = str(uuid4())
+    now = datetime.now(timezone.utc)
+    expires = (now + timedelta(days=7)).isoformat()
+    with connect() as db:
+        require_buyer_passport(db, passport_id, user)
+        seller = db.execute("""SELECT s.id,s.user_id FROM seller_accounts s JOIN auth_users u ON u.id=s.user_id
+            WHERE s.id=? AND u.role='seller' AND u.disabled_at IS NULL""", (payload.seller_id,)).fetchone()
+        if seller is None:
+            raise HTTPException(status_code=404, detail="Registered seller account not found")
+        if seller["user_id"] == user["id"]:
+            raise HTTPException(status_code=409, detail="A buyer cannot authorize their own seller account")
+        db.execute("""INSERT INTO passport_seller_grants(id,passport_id,buyer_user_id,seller_id,status,created_at,expires_at)
+            VALUES(?,?,?,?,'pending',?,?) ON CONFLICT(passport_id,seller_id) DO UPDATE SET
+            id=excluded.id,buyer_user_id=excluded.buyer_user_id,status='pending',created_at=excluded.created_at,
+            accepted_at=NULL,revoked_at=NULL,expires_at=excluded.expires_at""",
+            (grant_id, passport_id, user["id"], seller["id"], now.isoformat(), expires))
+    return {"id": grant_id, "passport_id": passport_id, "seller_id": payload.seller_id,
+            "status": "pending", "expires_at": expires}
+
+
+@seller_router.get("/grants")
+def list_seller_grants(request: Request):
+    user = request.state.user
+    with connect() as db:
+        if user["role"] == "buyer":
+            rows = db.execute("""SELECT g.id,g.passport_id,g.status,g.created_at,g.accepted_at,g.revoked_at,g.expires_at,s.id AS seller_id,u.email AS seller_email
+                FROM passport_seller_grants g JOIN seller_accounts s ON s.id=g.seller_id JOIN auth_users u ON u.id=s.user_id
+                WHERE g.buyer_user_id=? ORDER BY g.created_at DESC""", (user["id"],)).fetchall()
+        else:
+            rows = db.execute("""SELECT g.id,g.passport_id,g.status,g.created_at,g.expires_at
+                FROM passport_seller_grants g
+                WHERE g.seller_id=? ORDER BY g.created_at DESC""", (user.get("seller_id"),)).fetchall()
+        return [dict(row) for row in rows]
+
+
+@seller_router.post("/grants/{grant_id}/accept")
+def accept_seller_grant(grant_id: str, request: Request):
+    user = request.state.user
+    require_role(user, "seller")
+    now = utc_now()
+    with connect() as db:
+        cursor = db.execute("""UPDATE passport_seller_grants SET status='accepted',accepted_at=?
+            WHERE id=? AND seller_id=? AND status='pending' AND revoked_at IS NULL AND expires_at>?""",
+            (now, grant_id, user.get("seller_id"), now))
+        if cursor.rowcount != 1:
+            raise HTTPException(status_code=404, detail="Pending seller access grant not found")
+        row = db.execute("SELECT id,passport_id,status,accepted_at,expires_at FROM passport_seller_grants WHERE id=?", (grant_id,)).fetchone()
+        return dict(row)
+
+
+@router.delete("/{passport_id}/seller-grants/{grant_id}")
+def revoke_seller_grant(passport_id: str, grant_id: str, request: Request):
+    user = request.state.user
+    now = utc_now()
+    with connect() as db:
+        require_buyer_passport(db, passport_id, user)
+        cursor = db.execute("""UPDATE passport_seller_grants SET status='revoked',revoked_at=?
+            WHERE id=? AND passport_id=? AND buyer_user_id=? AND status!='revoked'""",
+            (now, grant_id, passport_id, user["id"]))
+        if cursor.rowcount != 1:
+            raise HTTPException(status_code=404, detail="Seller access grant not found")
+    return {"id": grant_id, "status": "revoked", "revoked_at": now}
+
+
+@router.get("/{passport_id}/seller-view")
+def seller_passport_view(passport_id: str, request: Request):
+    user = request.state.user
+    with connect() as db:
+        require_seller_grant(db, passport_id, user)
+        passport = db.execute("SELECT id,currency,status FROM purchase_passports WHERE id=?", (passport_id,)).fetchone()
+        conditions = db.execute("""SELECT id,owner,condition_type,operator,expected_value,unit,hard_or_soft,buyer_confirmed
+            FROM purchase_conditions WHERE passport_id=? AND owner='buyer' AND buyer_confirmed=1 ORDER BY rowid""", (passport_id,)).fetchall()
+    return {
+        "id": passport["id"],
+        "status": passport["status"],
+        "currency": passport["currency"],
+        "conditions": [
+            {**dict(row), "buyer_confirmed": bool(row["buyer_confirmed"])}
+            for row in conditions
+        ],
+    }
+
+
 @router.post("", response_model=PassportRead, status_code=201)
-def create_passport(payload: PassportCreate):
+def create_passport(payload: PassportCreate, request: Request):
+    user = request.state.user
+    require_role(user, "buyer")
     passport_id = str(uuid4())
     timestamp = utc_now()
     with connect() as db:
         db.execute(
-            "INSERT INTO purchase_passports(id,status,buyer_intent,currency,created_at,updated_at) VALUES(?,?,?,?,?,?)",
-            (passport_id, payload.status, payload.buyer_intent, payload.currency, timestamp, timestamp),
+            "INSERT INTO purchase_passports(id,status,buyer_intent,currency,created_at,updated_at,buyer_user_id) VALUES(?,?,?,?,?,?,?)",
+            (passport_id, payload.status, payload.buyer_intent, payload.currency, timestamp, timestamp, user["id"]),
         )
         return passport_record(db, passport_id)
 
 
 @router.post("/confirm-intent", response_model=PassportRead, status_code=201)
-def confirm_reviewed_intent(payload: ConfirmIntentRequest = Body(...)):
+def confirm_reviewed_intent(payload: ConfirmIntentRequest, request: Request):
     """Persist a buyer's explicit declaration atomically; this does not authenticate identity."""
     passport_id = str(uuid4())
+    user = request.state.user
+    require_role(user, "buyer")
     timestamp = utc_now()
     with connect() as db:
         db.execute(
-            "INSERT INTO purchase_passports(id,status,buyer_intent,currency,created_at,updated_at) VALUES(?,?,?,?,?,?)",
-            (passport_id, "draft", payload.buyer_intent, payload.currency, timestamp, timestamp),
+            "INSERT INTO purchase_passports(id,status,buyer_intent,currency,created_at,updated_at,buyer_user_id) VALUES(?,?,?,?,?,?,?)",
+            (passport_id, "draft", payload.buyer_intent, payload.currency, timestamp, timestamp, user["id"]),
         )
         for condition in payload.conditions:
             condition_unit = passport_condition_unit(
@@ -888,15 +1103,23 @@ def confirm_reviewed_intent(payload: ConfirmIntentRequest = Body(...)):
 
 
 @router.get("", response_model=list[PassportRead])
-def list_passports():
+def list_passports(request: Request):
+    user = request.state.user
     with connect() as db:
-        ids = db.execute("SELECT id FROM purchase_passports ORDER BY created_at DESC, rowid DESC").fetchall()
+        if user["role"] != "buyer":
+            return []
+        ids = db.execute("SELECT id FROM purchase_passports WHERE buyer_user_id=? ORDER BY created_at DESC, rowid DESC", (user["id"],)).fetchall()
         return [passport_record(db, row['id']) for row in ids]
 
 
 @router.get("/{passport_id}", response_model=PassportRead)
-def get_passport(passport_id: str):
+def get_passport(passport_id: str, request: Request):
+    user = request.state.user
     with connect() as db:
+        if user["role"] != "buyer":
+            raise HTTPException(status_code=403, detail="Buyer role required")
+        if db.execute("SELECT 1 FROM purchase_passports WHERE id=? AND buyer_user_id=?", (passport_id, user["id"])).fetchone() is None:
+            raise HTTPException(status_code=404, detail="Passport not found")
         result = passport_record(db, passport_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Passport not found")
@@ -904,23 +1127,27 @@ def get_passport(passport_id: str):
 
 
 @router.get("/{passport_id}/offers")
-def list_seller_offers(passport_id: str):
+def list_seller_offers(passport_id: str, request: Request):
+    user = request.state.user
     with connect() as db:
-        if db.execute("SELECT 1 FROM purchase_passports WHERE id = ?", (passport_id,)).fetchone() is None:
-            raise HTTPException(status_code=404, detail="Passport not found")
-        ids = db.execute(
-            "SELECT id FROM offer_snapshots WHERE passport_id = ? ORDER BY captured_at DESC, rowid DESC",
-            (passport_id,),
-        ).fetchall()
+        if user["role"] == "buyer":
+            require_buyer_passport(db, passport_id, user)
+            ids = db.execute("SELECT id FROM offer_snapshots WHERE passport_id=? ORDER BY captured_at DESC,rowid DESC", (passport_id,)).fetchall()
+        else:
+            require_seller_grant(db, passport_id, user)
+            ids = db.execute("SELECT id FROM offer_snapshots WHERE passport_id=? AND seller_user_id=? ORDER BY captured_at DESC,rowid DESC", (passport_id, user["id"])).fetchall()
         return [offer_record(db, passport_id, item["id"]) for item in ids]
 
 
 @router.post("/{passport_id}/offers", status_code=201)
-def submit_seller_offer(passport_id: str, payload: SellerOfferCreate):
+def submit_seller_offer(passport_id: str, payload: SellerOfferCreate, request: Request):
     """Persist a seller declaration and raw evidence; uploads are never verified here."""
     offer_id = str(uuid4())
     captured_at = utc_now()
+    user = request.state.user
+    require_role(user, "seller")
     with connect() as db:
+        require_seller_grant(db, passport_id, user)
         passport = db.execute(
             "SELECT currency FROM purchase_passports WHERE id = ?", (passport_id,)
         ).fetchone()
@@ -941,8 +1168,14 @@ def submit_seller_offer(passport_id: str, payload: SellerOfferCreate):
         for submitted in payload.conditions:
             buyer = buyer_by_id[submitted.condition_id]
             if buyer["condition_type"] in NUMERIC_TYPES:
+                seller_numeric_value = submitted.seller_value
+                if buyer["condition_type"] in {"ram", "storage_capacity"}:
+                    capacity = re.fullmatch(r"\s*([0-9]+(?:\.[0-9]+)?)\s*(GB|GIB|TB|TIB)\s*", seller_numeric_value, re.IGNORECASE)
+                    if capacity is None or capacity.group(2).upper() != str(buyer["unit"]).upper():
+                        raise HTTPException(status_code=422, detail="Seller capacity values must use the buyer condition's explicit unit; MIRROR does not convert units")
+                    seller_numeric_value = capacity.group(1)
                 try:
-                    stated = Decimal(submitted.seller_value)
+                    stated = Decimal(seller_numeric_value)
                 except InvalidOperation as error:
                     raise HTTPException(status_code=422, detail="Seller numeric condition values must be valid numbers") from error
                 if not stated.is_finite():
@@ -955,12 +1188,12 @@ def submit_seller_offer(passport_id: str, payload: SellerOfferCreate):
         db.execute("""
             INSERT INTO offer_snapshots
             (id,passport_id,product_name,seller_name,product_url,displayed_price,currency,
-             delivery_promise,return_terms,captured_at)
-            VALUES(?,?,?,?,?,?,?,?,?,?)
+            delivery_promise,return_terms,captured_at,seller_user_id)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?)
         """, (
             offer_id, passport_id, payload.product_name.strip(), payload.seller_name.strip(),
             payload.product_url, payload.displayed_price, payload.currency,
-            payload.delivery_promise, payload.return_terms, captured_at,
+            payload.delivery_promise, payload.return_terms, captured_at, user["id"],
         ))
 
         for submitted in payload.conditions:
@@ -1026,7 +1259,7 @@ def submit_seller_offer(passport_id: str, payload: SellerOfferCreate):
 
 
 @router.post("/{passport_id}/evidence", response_model=EvidenceRead, status_code=201)
-def ingest_evidence(passport_id: str, payload: EvidenceCreate):
+def ingest_evidence(passport_id: str, payload: EvidenceCreate, request: Request):
     evidence_id = str(uuid4())
     event_id = str(uuid4())
     received_at = utc_now()
@@ -1035,9 +1268,9 @@ def ingest_evidence(passport_id: str, payload: EvidenceCreate):
         "Source authenticity has not been verified.",
         "No condition claim has been verified from this content.",
     ]
+    user = request.state.user
     with connect() as db:
-        if db.execute("SELECT 1 FROM purchase_passports WHERE id = ?", (passport_id,)).fetchone() is None:
-            raise HTTPException(status_code=404, detail="Passport not found")
+        require_buyer_passport(db, passport_id, user)
         for condition_id in payload.condition_ids:
             condition = db.execute(
                 "SELECT 1 FROM purchase_conditions WHERE id = ? AND passport_id = ?",
@@ -1079,20 +1312,29 @@ def ingest_evidence(passport_id: str, payload: EvidenceCreate):
 
 
 @router.get("/{passport_id}/evidence", response_model=list[EvidenceRead])
-def list_evidence(passport_id: str):
+def list_evidence(passport_id: str, request: Request):
+    user = request.state.user
     with connect() as db:
-        if db.execute("SELECT 1 FROM purchase_passports WHERE id = ?", (passport_id,)).fetchone() is None:
-            raise HTTPException(status_code=404, detail="Passport not found")
-        evidence_ids = db.execute(
-            "SELECT id FROM evidence_items WHERE passport_id = ? ORDER BY received_at, rowid",
-            (passport_id,),
-        ).fetchall()
+        if user["role"] == "buyer":
+            require_buyer_passport(db, passport_id, user)
+            evidence_ids = db.execute("SELECT id FROM evidence_items WHERE passport_id=? ORDER BY received_at,rowid", (passport_id,)).fetchall()
+        else:
+            require_seller_grant(db, passport_id, user)
+            evidence_ids = db.execute("""SELECT e.id FROM evidence_items e JOIN offer_snapshots o ON o.id=e.offer_snapshot_id
+                WHERE e.passport_id=? AND o.seller_user_id=? ORDER BY e.received_at,e.rowid""", (passport_id, user["id"])).fetchall()
         return [evidence_record(db, passport_id, item["id"]) for item in evidence_ids]
 
 
 @router.get("/{passport_id}/evidence/{evidence_id}", response_model=EvidenceRead)
-def get_evidence(passport_id: str, evidence_id: str, include_content: bool = Query(False)):
+def get_evidence(passport_id: str, evidence_id: str, request: Request, include_content: bool = Query(False)):
+    user = request.state.user
     with connect() as db:
+        if user["role"] == "buyer": require_buyer_passport(db, passport_id, user)
+        else:
+            require_seller_grant(db, passport_id, user)
+            if db.execute("""SELECT 1 FROM evidence_items e JOIN offer_snapshots o ON o.id=e.offer_snapshot_id
+                WHERE e.id=? AND e.passport_id=? AND o.seller_user_id=?""", (evidence_id, passport_id, user["id"])).fetchone() is None:
+                raise HTTPException(status_code=404, detail="Evidence not found")
         result = evidence_record(db, passport_id, evidence_id, include_content=include_content)
     if result is None:
         raise HTTPException(status_code=404, detail="Evidence not found")
@@ -1100,13 +1342,13 @@ def get_evidence(passport_id: str, evidence_id: str, include_content: bool = Que
 
 
 @router.post("/{passport_id}/disputes", status_code=201)
-def report_dispute(passport_id: str, payload: DisputeCreate):
+def report_dispute(passport_id: str, payload: DisputeCreate, request: Request):
     """Record a buyer-declared broken promise; no identity or refund outcome is asserted."""
     dispute_id = str(uuid4())
     reported_at = utc_now()
+    user = request.state.user
     with connect() as db:
-        if db.execute("SELECT 1 FROM purchase_passports WHERE id=?", (passport_id,)).fetchone() is None:
-            raise HTTPException(status_code=404, detail="Passport not found")
+        require_buyer_passport(db, passport_id, user)
         if db.execute("SELECT 1 FROM purchase_conditions WHERE id=? AND passport_id=? AND owner='buyer'",
                       (payload.condition_id, passport_id)).fetchone() is None:
             raise HTTPException(status_code=422, detail="Dispute condition must be a buyer condition on this Passport")
@@ -1137,8 +1379,10 @@ def dispute_record(db: sqlite3.Connection, passport_id: str, dispute_id: str) ->
 
 
 @router.get("/{passport_id}/disputes")
-def list_disputes(passport_id: str):
+def list_disputes(passport_id: str, request: Request):
+    user = request.state.user
     with connect() as db:
+        require_buyer_passport(db, passport_id, user)
         ids = db.execute("SELECT id FROM passport_disputes WHERE passport_id=? ORDER BY reported_at DESC",
                          (passport_id,)).fetchall()
         if not ids and db.execute("SELECT 1 FROM purchase_passports WHERE id=?", (passport_id,)).fetchone() is None:
@@ -1167,8 +1411,9 @@ def evaluate_passport_state(db: sqlite3.Connection, passport_id: str, offer_id: 
         """, (passport_id, offer_id)).fetchall()
     conditions = [dict(row) for row in condition_rows]
     linked_evidence = db.execute("""
-            SELECT ce.condition_id, e.id, e.verification_status, e.lifecycle_state,
-                   e.is_simulated, c.claim_id, c.claim_type, c.claim_value,
+            SELECT ce.condition_id, e.id, e.evidence_type, e.source_classification,
+                   e.verification_status, e.lifecycle_state, e.is_simulated, e.captured_at,
+                   c.claim_id, c.claim_type, c.claim_value, c.unit AS claim_unit,
                    ve.to_state AS verification_event_state
             FROM condition_evidence ce
             JOIN evidence_items e ON e.id = ce.evidence_id
@@ -1183,17 +1428,37 @@ def evaluate_passport_state(db: sqlite3.Connection, passport_id: str, offer_id: 
         """, (passport_id, offer_id, offer_id)).fetchall()
 
     evidence_by_condition: dict[str, list[dict]] = {}
+    evaluation_time = datetime.now(timezone.utc)
     for row in linked_evidence:
-        evidence_by_condition.setdefault(row["condition_id"], []).append({
-            "id": row["id"],
-            "verification_status": row["verification_status"],
-            "lifecycle_state": row["lifecycle_state"],
-            "is_simulated": bool(row["is_simulated"]),
-            "claim_id": row["claim_id"],
-            "claim_type": row["claim_type"],
-            "claim_value": row["claim_value"],
-            "verification_event_state": row["verification_event_state"],
-        })
+        condition_evidence = evidence_by_condition.setdefault(row["condition_id"], [])
+        evidence = next((item for item in condition_evidence if item["id"] == row["id"]), None)
+        if evidence is None:
+            evidence = {
+                "id": row["id"],
+                "evidence_type": row["evidence_type"],
+                "source_classification": row["source_classification"],
+                "verification_status": row["verification_status"],
+                "lifecycle_state": row["lifecycle_state"],
+                "is_simulated": bool(row["is_simulated"]),
+                "claims": [],
+            }
+            if row["evidence_type"] == "channel3_product_catalogue":
+                try:
+                    captured = datetime.fromisoformat(row["captured_at"].replace("Z", "+00:00"))
+                    if captured.tzinfo is None:
+                        raise ValueError("catalogue timestamp must include timezone")
+                    evidence["evidence_stale"] = evaluation_time - captured.astimezone(timezone.utc) > timedelta(days=30)
+                except (TypeError, ValueError):
+                    evidence["evidence_stale"] = True
+            condition_evidence.append(evidence)
+        if row["claim_id"] is not None:
+            evidence["claims"].append({
+                "claim_id": row["claim_id"],
+                "claim_type": row["claim_type"],
+                "claim_value": row["claim_value"],
+                "unit": row["claim_unit"],
+                "verification_event_state": row["verification_event_state"],
+            })
     result = evaluate_conditions(passport_id, conditions, evidence_by_condition)
     return apply_fulfilment_risk(result, conditions)
 
@@ -1207,13 +1472,15 @@ async def evaluate_passport(
     if await request.body():
         raise HTTPException(status_code=422, detail="Evaluation uses persisted evidence and accepts no request body")
     with connect() as db:
+        require_buyer_passport(db, passport_id, request.state.user)
         return evaluate_passport_state(db, passport_id, offer_id)
 
 
 @router.post("/{passport_id}/conditions", response_model=list[ConditionRead], status_code=201)
-def add_conditions(passport_id: str, conditions: list[ConditionCreate] = Body(min_length=1, max_length=100)):
+def add_conditions(passport_id: str, request: Request, conditions: list[ConditionCreate] = Body(min_length=1, max_length=100)):
     timestamp = utc_now()
     with connect() as db:
+        require_buyer_passport(db, passport_id, request.state.user)
         passport = db.execute(
             "SELECT currency FROM purchase_passports WHERE id = ?", (passport_id,)
         ).fetchone()

@@ -1,4 +1,4 @@
-const DEFAULT_API_BASE_URL = 'http://127.0.0.1:8002';
+const DEFAULT_API_BASE_URL = 'http://127.0.0.1:8010';
 
 const configuredBase = globalThis.MIRROR_API_BASE_URL
   || document.querySelector('meta[name="mirror-api-base-url"]')?.content

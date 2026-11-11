@@ -21,6 +21,9 @@ if (root) {
     delivery_days: ['eq', 'ne', 'lt', 'lte', 'gt', 'gte'],
     product_name: ['eq', 'ne'], seller_name: ['eq', 'ne'], currency: ['eq', 'ne'],
     return_terms: ['eq', 'ne'], item_condition: ['eq', 'ne'], sku_id: ['eq', 'ne'],
+    ram: ['eq', 'ne', 'lt', 'lte', 'gt', 'gte'], storage_capacity: ['eq', 'ne', 'lt', 'lte', 'gt', 'gte'],
+    brand: ['eq', 'ne'], model: ['eq', 'ne'], processor_family: ['eq', 'ne'],
+    display_resolution: ['eq', 'ne'], operating_system: ['eq', 'ne'],
   };
   const operatorLabels = {
     eq: 'is', ne: 'is not', lt: 'less than', lte: 'at most', gt: 'greater than', gte: 'at least',
@@ -360,8 +363,9 @@ if (root) {
     confirmButton.textContent = 'Saving reviewed conditions…';
     setStatus('Saving your explicit declaration…', 'loading');
     try {
+      const csrf = document.cookie.split('; ').find(item => item.startsWith('mirror_csrf='))?.split('=').slice(1).join('=') || '';
       const response = await fetch(apiUrl('/api/passports/confirm-intent'), {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', 'X-Mirror-CSRF': decodeURIComponent(csrf) }, body: JSON.stringify(payload),
       });
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(apiError(data, 'Could not save the reviewed conditions. Please check the values.'));

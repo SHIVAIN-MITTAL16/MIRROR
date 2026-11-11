@@ -3,6 +3,9 @@ venv/
 **pycache**/
 *.pyc
 .pytest_cache/
+node_modules/
+playwright-report/
+test-results/
 .DS_Store
 data/*.sqlite3
 data/*.sqlite3-shm

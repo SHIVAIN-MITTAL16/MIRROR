@@ -57,15 +57,36 @@ def _channel3_request(path: str, method: str, body: dict | None = None) -> dict:
 def _product_row(product: dict) -> dict:
     offers = product.get("offers") if isinstance(product.get("offers"), list) else []
     attributes = product.get("structured_attributes")
+    if not isinstance(attributes, dict):
+        attributes = {}
+    brand = product.get("brand")
+    if not isinstance(brand, str) or not brand.strip():
+        brands = product.get("brands")
+        distinct_brands = {
+            item.strip().casefold(): item.strip() for item in brands
+            if isinstance(item, str) and item.strip()
+        } if isinstance(brands, list) else {}
+        brand = next(iter(distinct_brands.values())) if len(distinct_brands) == 1 else None
+    model = product.get("model")
+    if not isinstance(model, str) or not model.strip():
+        model_attribute = attributes.get("model")
+        if isinstance(model_attribute, list):
+            distinct_models = {
+                item.strip().casefold(): item.strip() for item in model_attribute
+                if isinstance(item, str) and item.strip()
+            }
+            model = next(iter(distinct_models.values())) if len(distinct_models) == 1 else None
+        elif isinstance(model_attribute, str):
+            model = model_attribute
     return {
         "product_id": product.get("id"),
         "title": product.get("title"),
-        "brand": product.get("brand"),
-        "model": product.get("model"),
+        "brand": brand,
+        "model": model,
         "description": product.get("description"),
         "product_url": product.get("url"),
         "image_url": product.get("image_url"),
-        "structured_attributes": attributes if isinstance(attributes, dict) else {},
+        "structured_attributes": attributes,
         "offers": offers,
         "source": "Channel3",
         "retrieved_at": datetime.now(timezone.utc).isoformat(),
@@ -80,7 +101,11 @@ def product_discovery_config():
 @router.post("/search")
 def search_products(payload: ProductSearchRequest):
     response = _channel3_request("/v1/search", "POST", {"query": payload.query, "limit": payload.limit})
-    records = response.get("items", response.get("data", []))
+    # Channel3's current REST response uses `products`; keep the SDK-style
+    # `items`/`data` envelopes accepted for compatibility with older accounts.
+    records = response.get("products", response.get("items", response.get("data", [])))
+    if isinstance(records, dict):
+        records = records.get("products", records.get("items", records.get("data", [])))
     if not isinstance(records, list):
         raise HTTPException(status_code=502, detail="Channel3 returned an unsupported product response")
     return {

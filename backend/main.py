@@ -19,8 +19,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from backend.passports import initialize_database, router as passports_router
+from backend.auth import router as auth_router
+from backend.passports import initialize_database, router as passports_router, seller_router as seller_access_router
 from backend.intent_extraction import router as passport_intents_router
+from backend.catalogue_verification import router as catalogue_verification_router
 
 
 APP = FastAPI()
@@ -34,11 +36,14 @@ if "*" in cors_origins:
 APP.add_middleware(
 	CORSMiddleware,
 	allow_origins=cors_origins,
-	allow_credentials=False,
-	allow_methods=["GET", "POST"],
-	allow_headers=["Content-Type"],
+	allow_credentials=True,
+	allow_methods=["GET", "POST", "DELETE"],
+	allow_headers=["Content-Type", "X-Mirror-CSRF"],
 )
+APP.include_router(auth_router)
 APP.include_router(passports_router)
+APP.include_router(seller_access_router)
+APP.include_router(catalogue_verification_router)
 APP.include_router(passport_intents_router)
 
 SKU_COLUMNS = [

@@ -300,12 +300,29 @@ class IntentExtractionTests(unittest.TestCase):
 
     def test_unsupported_condition_type_is_flagged(self):
         response, _ = self.request_with_model(
-            "At least 16 GB RAM is required.",
-            model_result([proposal("ram", "gte", "16", "At least 16 GB RAM is required", unit="GB")]),
+            "At least 2000 battery cycles are required.",
+            model_result([proposal("battery_cycles", "gte", "2000", "At least 2000 battery cycles are required")]),
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["proposals"], [])
         self.assertTrue(response.json()["clarification_questions"])
+
+    def test_catalogue_supported_ram_requires_explicit_unit_and_does_not_convert(self):
+        response, _ = self.request_with_model(
+            "At least 16 GB RAM is required.",
+            model_result([proposal("ram", "gte", "16", "At least 16 GB RAM is required", unit="GB")]),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["proposals"][0]["condition_type"], "ram")
+        self.assertEqual(response.json()["proposals"][0]["expected_value"], "16")
+        self.assertEqual(response.json()["proposals"][0]["unit"], "GB")
+
+        no_unit, _ = self.request_with_model(
+            "At least 16 RAM is required.",
+            model_result([proposal("ram", "gte", "16", "At least 16 RAM is required")]),
+        )
+        self.assertEqual(no_unit.json()["proposals"][0]["unit"], None)
+        self.assertTrue(no_unit.json()["clarification_questions"])
 
     def test_unsupported_operator_is_flagged(self):
         response, _ = self.request_with_model(

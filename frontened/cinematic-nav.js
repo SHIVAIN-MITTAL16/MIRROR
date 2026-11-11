@@ -1,3 +1,5 @@
+import { apiUrl } from './api-config.js';
+
 const shell = document.querySelector('.shell');
 if (shell) {
   const sidebar = document.createElement('aside');
@@ -24,7 +26,7 @@ if (shell) {
   topbar.className = 'mirror-topbar';
   topbar.innerHTML = [
     '<button class="mobile-nav-toggle" id="mirror-menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false">☰</button><div><p class="topbar-kicker">MIRROR / PURCHASE ASSURANCE</p><h1>Command Centre</h1><p>Buyer intent, seller offers and evidence in one place.</p></div>',
-    '<div class="topbar-tools"><label class="passport-search"><span aria-hidden="true">⌕</span><input id="mirror-passport-search" type="search" placeholder="Search Passports" aria-label="Search Passports"></label><span id="mirror-api-status" class="api-status"><i></i>Checking backend</span></div>'
+    '<div class="topbar-tools"><label class="passport-search"><span aria-hidden="true">⌕</span><input id="mirror-passport-search" type="search" placeholder="Search Passports" aria-label="Search Passports"></label><span id="mirror-api-status" class="api-status is-checking" role="status" aria-live="polite"><i aria-hidden="true"></i><span class="api-status-label">Checking backend...</span><button class="api-status-retry" type="button" hidden>Retry</button></span></div>'
   ].join('');
 
   const hero = shell.querySelector('.hero');
@@ -72,12 +74,42 @@ if (shell) {
   });
   const search = topbar.querySelector('#mirror-passport-search');
   search.addEventListener('input', () => window.dispatchEvent(new CustomEvent('mirror:passport-search', { detail: { query: search.value } })));
-  window.addEventListener('mirror:backend-status', event => {
-    const badge = topbar.querySelector('#mirror-api-status');
-    badge.classList.toggle('is-connected', Boolean(event.detail?.connected));
-    badge.classList.toggle('is-offline', !event.detail?.connected);
-    badge.innerHTML = '<i></i>' + (event.detail?.connected ? 'Backend connected' : 'Backend unavailable');
-  });
+  const badge = topbar.querySelector('#mirror-api-status');
+  const statusLabel = badge.querySelector('.api-status-label');
+  const retryButton = badge.querySelector('.api-status-retry');
+  let healthRequest = null;
+
+  const publishHealth = state => {
+    badge.classList.toggle('is-checking', state === 'checking');
+    badge.classList.toggle('is-connected', state === 'online');
+    badge.classList.toggle('is-offline', state === 'offline');
+    statusLabel.textContent = state === 'checking' ? 'Checking backend...' : state === 'online' ? 'System Online' : 'Backend Offline';
+    retryButton.hidden = state !== 'offline';
+    retryButton.disabled = state === 'checking';
+    window.dispatchEvent(new CustomEvent('mirror:backend-status', { detail: { state, connected: state === 'online' } }));
+  };
+
+  const checkBackend = () => {
+    if (healthRequest) return healthRequest;
+    publishHealth('checking');
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 5000);
+    healthRequest = fetch(apiUrl('/health'), { method: 'GET', cache: 'no-store', signal: controller.signal })
+      .then(async response => {
+        if (!response.ok) throw new Error(`Health check returned ${response.status}`);
+        const result = await response.json();
+        if (result?.status !== 'ok' || result?.service !== 'mirror') throw new Error('Health response was invalid');
+        publishHealth('online');
+      })
+      .catch(() => publishHealth('offline'))
+      .finally(() => {
+        window.clearTimeout(timeout);
+        healthRequest = null;
+      });
+    return healthRequest;
+  };
+  retryButton.addEventListener('click', () => checkBackend());
+  checkBackend();
 
   const activate = () => {
     const links = [...sidebar.querySelectorAll('.sidebar-navigation a[href^="#"]')];
