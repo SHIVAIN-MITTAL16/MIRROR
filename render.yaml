@@ -1,18 +1,14 @@
-services:
+﻿services:
   - type: web
     name: mirror-api
     runtime: python
-    plan: starter
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn backend.ai_app:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
-    disk:
-      name: mirror-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: MIRROR_DATABASE_PATH
-        value: /var/data/mirror.sqlite3
+        value: /tmp/mirror.sqlite3
       - key: MIRROR_CORS_ORIGINS
         value: https://mirror-ui.onrender.com
       - key: PAYPAL_BASE_URL
@@ -27,6 +23,7 @@ services:
         sync: false
       - key: CHANNEL3_API_KEY
         sync: false
+
   - type: web
     name: mirror-ui
     runtime: static
